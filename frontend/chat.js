@@ -400,6 +400,155 @@ export async function showConvHistoryModal() {
     <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
 }
 
+// ── History Compression
+
+let _compressKeepCount = 4;
+let _compressAbort = null;
+
+export function showCompressModal() {
+  if (!S.activeConvId) {
+    toast("No active conversation", true);
+    return;
+  }
+  if ((S.messages || []).length < 4) {
+    toast("Not enough messages to compress", true);
+    return;
+  }
+  showModal(`
+    <h2>Compress History</h2>
+    <p style="color:var(--text-muted);margin-bottom:16px;font-size:0.92em">Summarize the story so far into a new conversation, carrying over the most recent messages.</p>
+    <div style="margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:0.95em">
+        Keep last
+        <select id="compress-keep-select" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-input,var(--bg-secondary));color:var(--text)">
+          <option value="2">2 messages</option>
+          <option value="4" selected>4 messages</option>
+          <option value="6">6 messages</option>
+          <option value="8">8 messages</option>
+        </select>
+        in the new conversation
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="generateCompressionSummary()">Generate Summary →</button>
+    </div>`);
+}
+
+export async function generateCompressionSummary() {
+  if (_compressAbort) {
+    _compressAbort.abort();
+    _compressAbort = null;
+  }
+
+  const selectEl = document.getElementById("compress-keep-select");
+  if (selectEl) _compressKeepCount = parseInt(selectEl.value, 10);
+
+  // Transition to step 2 in-place
+  const modalEl = document.querySelector(".modal");
+  if (!modalEl) return;
+  modalEl.innerHTML = `
+    <h2>Review Summary</h2>
+    <p id="compress-status" style="color:var(--text-muted);margin-bottom:8px;font-size:0.9em">Generating summary…</p>
+    <textarea id="compress-textarea" style="width:100%;box-sizing:border-box;height:280px;resize:vertical;font-family:inherit;font-size:0.9em;padding:10px;background:var(--bg-input,var(--bg-secondary));border:1px solid var(--border);border-radius:6px;color:var(--text)" spellcheck="false" placeholder="Summary will appear here…"></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="compress-regen-btn" onclick="generateCompressionSummary()" disabled>Regenerate</button>
+      <button class="btn btn-accent" id="compress-apply-btn" onclick="applyCompression()" disabled>Create New Conversation</button>
+    </div>`;
+
+  const textarea = document.getElementById("compress-textarea");
+  const statusEl = document.getElementById("compress-status");
+  const regenBtn = document.getElementById("compress-regen-btn");
+  const applyBtn = document.getElementById("compress-apply-btn");
+
+  _compressAbort = new AbortController();
+  let summaryText = "";
+
+  try {
+    const resp = await fetch(`/api/conversations/${S.activeConvId}/summarize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep_count: _compressKeepCount }),
+      signal: _compressAbort.signal,
+    });
+
+    if (!resp.ok) {
+      const detail = await resp.text();
+      throw new Error(detail);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ") && currentEvent) {
+          const data = line.slice(6);
+          if (currentEvent === "token") {
+            summaryText += data.replace(/\\n/g, "\n");
+            if (textarea) textarea.value = summaryText;
+          } else if (currentEvent === "error") {
+            throw new Error(data);
+          }
+          currentEvent = null;
+        }
+      }
+    }
+
+    if (statusEl) statusEl.textContent = "Review and edit the summary, then create the new conversation.";
+    if (regenBtn) regenBtn.disabled = false;
+    if (applyBtn) applyBtn.disabled = false;
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+    toast("Summary generation failed: " + e.message, true);
+    if (regenBtn) regenBtn.disabled = false;
+  } finally {
+    _compressAbort = null;
+  }
+}
+
+export async function applyCompression() {
+  const textarea = document.getElementById("compress-textarea");
+  if (!textarea) return;
+  const summary = textarea.value.trim();
+  if (!summary) {
+    toast("Summary is empty", true);
+    return;
+  }
+
+  const applyBtn = document.getElementById("compress-apply-btn");
+  const regenBtn = document.getElementById("compress-regen-btn");
+  if (applyBtn) applyBtn.disabled = true;
+  if (regenBtn) regenBtn.disabled = true;
+
+  try {
+    const result = await api.post(`/conversations/${S.activeConvId}/compress`, {
+      summary,
+      keep_count: _compressKeepCount,
+    });
+    closeModal();
+    await loadConversations();
+    await selectConversation(result.new_conversation_id);
+    toast("New conversation created from compression");
+  } catch (e) {
+    toast("Failed to apply compression: " + e.message, true);
+    if (applyBtn) applyBtn.disabled = false;
+    if (regenBtn) regenBtn.disabled = false;
+  }
+}
+
 // ── Title Edit
 let _titleEditBackup = "";
 

@@ -6,14 +6,13 @@
 [Done]  + Tag-based search.
   + Handle importing characters with the same name => List the chars with that name, ask user whether to make a new one or replace, and which one.
 
-- Feature: Condense history and make a new conversation from there.
-- Feature: Lorebooks:
-  + Add a World collapsible to left side panel that contains a list of recent worlds/lorebooks.
-  + Add a tab "Misc" to character cards => It contains an associated World, can be updated. Update card on detach/attach entry. Will have a tags section later.
-  + 
+- Feature: Compress history and make a new conversation from there.
+  + Display a modal asking how many recent chat messages to keep (max 8).
+  + Model to summarize the story so far, keeping important dialogues ad-verbatim, and key beats and milestones, relationships => User reviews and approves.
+  + This prompt is very important because representation for the next cycle is very important.
+  + On user approval, create a new conversation where first message is the previously generated summary. Append the recent chat messages that the user wanted to keep.
 
 -- Not yet --
 - Feature: Tags and search for Convos.
-- Feature: Lorebooks.
 - Feature: Macros.
 - Feature: Add a magic button to the AI's message for "rewrite with custom direction." Clicking it opens a small input box where the user can specify the rewrite direction.

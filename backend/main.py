@@ -86,6 +86,8 @@ from .database import (
 )
 import asyncio
 from .orchestrator import handle_turn, handle_regenerate, handle_super_regenerate
+from .llm_client import LLMClient
+from .endpoint_profiles import profile_for
 from . import tavern_cards
 
 logging.basicConfig(level=logging.INFO)
@@ -273,6 +275,15 @@ class ConversationCreate(BaseModel):
 
 class ConversationUpdate(BaseModel):
     title: Optional[str] = None
+
+
+class SummarizeRequest(BaseModel):
+    keep_count: int  # must be one of 2, 4, 6, 8
+
+
+class CompressRequest(BaseModel):
+    summary: str
+    keep_count: int  # must be one of 2, 4, 6, 8
 
 
 class CharacterCardCreate(BaseModel):
@@ -867,6 +878,135 @@ async def api_update_conversation(cid: str, data: ConversationUpdate):
         raise HTTPException(404, "Conversation not found")
     result = await update_conversation(cid, data.model_dump(exclude_unset=True))
     return result
+
+
+@app.post("/api/conversations/{cid}/summarize")
+async def api_summarize_conversation(cid: str, data: SummarizeRequest, request: Request):
+    """Stream a narrative summary of the conversation history, excluding the last keep_count messages."""
+    if data.keep_count not in (2, 4, 6, 8):
+        raise HTTPException(400, "keep_count must be one of 2, 4, 6, 8")
+
+    conv = await get_conversation(cid)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+
+    messages = await get_messages_with_branch_info(cid)
+    history_slice = messages[: max(0, len(messages) - data.keep_count)]
+
+    if not history_slice:
+        raise HTTPException(400, "Not enough messages to summarize")
+
+    settings = await get_settings()
+    char_name = conv.get("character_name", "Character") or "Character"
+    char_scenario = conv.get("character_scenario", "") or ""
+
+    client = LLMClient(
+        settings["endpoint_url"],
+        api_key=settings.get("api_key", ""),
+        profile=profile_for(settings["endpoint_url"], settings.get("model_name", "")),
+    )
+    client_ref = [client]
+
+    async def _gen():
+        parts = []
+        for msg in history_slice:
+            label = char_name if msg["role"] == "assistant" else "User"
+            parts.append(f"{label}: {msg['content']}")
+        history_text = "\n\n".join(parts)
+
+        system = (
+            f"You are a narrative scribe summarizing a roleplay story between User and {char_name}."
+            + (f" Setting: {char_scenario}." if char_scenario else "")
+            + " Write a rich prose summary of the events so far."
+            " Preserve significant dialogue verbatim in quotes."
+            " Record key story beats, milestones, and relationship developments."
+            " Write in past tense. Be thorough — this will be the sole context for the story's continuation."
+        )
+
+        llm_messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": f"Story to summarize:\n\n{history_text}\n\nWrite the narrative summary now.",
+            },
+        ]
+
+        params = {
+            k: v
+            for k in ["temperature", "max_tokens", "top_p", "min_p", "top_k", "repetition_penalty"]
+            if (v := settings.get(k)) is not None
+        }
+
+        try:
+            async for chunk in client.complete(llm_messages, settings.get("model_name", ""), **params):
+                if chunk["type"] == "content":
+                    yield {"event": "token", "data": chunk["delta"]}
+            yield {"event": "done", "data": ""}
+        except Exception as e:
+            logger.error("Summarize error: %s", e)
+            yield {"event": "error", "data": str(e)}
+
+    return _CleanupStreamingResponse(
+        _sse_stream(_gen(), request, client_ref=client_ref),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/api/conversations/{cid}/compress")
+async def api_compress_conversation(cid: str, data: CompressRequest):
+    """Create a new conversation seeded with a summary, then re-append the last keep_count messages."""
+    if data.keep_count not in (2, 4, 6, 8):
+        raise HTTPException(400, "keep_count must be one of 2, 4, 6, 8")
+    if not data.summary.strip():
+        raise HTTPException(400, "summary must not be empty")
+
+    conv = await get_conversation(cid)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+
+    messages = await get_messages_with_branch_info(cid)
+    tail = messages[max(0, len(messages) - data.keep_count) :]
+
+    char_name = conv.get("character_name", "") or ""
+    new_title = f"{char_name} (continued)" if char_name else "Continued"
+    new_cid = str(uuid.uuid4())
+
+    await create_conversation(
+        cid=new_cid,
+        title=new_title,
+        char_name=char_name,
+        char_scenario=conv.get("character_scenario", "") or "",
+        first_mes="",
+        post_history_instructions=conv.get("post_history_instructions", "") or "",
+        character_card_id=conv.get("character_card_id"),
+    )
+
+    # Seed with the approved summary as the first assistant message
+    prev_id = await add_message(new_cid, "assistant", data.summary.strip(), 0)
+    await set_active_leaf(new_cid, prev_id)
+
+    # Re-insert tail messages, chaining via parent_id
+    for i, msg in enumerate(tail):
+        atts = msg.get("attachments") or []
+        att_list = (
+            [
+                {
+                    "mime_type": a["mime_type"],
+                    "data_b64": a["data_b64"],
+                    "filename": a.get("filename"),
+                    "size": a.get("size"),
+                }
+                for a in atts
+            ]
+            if atts
+            else None
+        )
+        prev_id = await add_message(
+            new_cid, msg["role"], msg["content"], i + 1, parent_id=prev_id, attachments=att_list
+        )
+        await set_active_leaf(new_cid, prev_id)
+
+    return {"new_conversation_id": new_cid}
 
 
 # Character Cards ──

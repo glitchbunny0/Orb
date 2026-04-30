@@ -2216,7 +2216,8 @@ async def sync_conversations_for_card(
             await db.execute(
                 """UPDATE conversations
                    SET title = ?
-                   WHERE character_card_id = ? AND title = ?""",
+                   WHERE character_card_id = ? AND title = ?
+                     AND (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id) <= 1""",
                 (card.get("name", ""), card_id, old_name),
             )
         await db.commit()

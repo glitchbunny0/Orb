@@ -968,7 +968,8 @@ async def api_compress_conversation(cid: str, data: CompressRequest):
     tail = messages[max(0, len(messages) - data.keep_count) :]
 
     char_name = conv.get("character_name", "") or ""
-    new_title = f"{char_name} (continued)" if char_name else "Continued"
+    old_title = conv.get("title", "") or ""
+    new_title = f"{old_title} (continued)" if old_title else "Continued"
     new_cid = str(uuid.uuid4())
 
     await create_conversation(

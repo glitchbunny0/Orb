@@ -237,7 +237,6 @@ function handleEscape(event) {
   if (event.key !== "Escape") return;
   closeMobileSidebar();
   closeMobileHeaderActions();
-  closeMobileUtilityPanels();
 }
 
 function handleViewportChange() {

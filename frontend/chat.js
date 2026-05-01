@@ -312,11 +312,15 @@ export async function selectConversation(id) {
 }
 
 async function deleteConversation(id) {
+  const conv = S.conversations.find((c) => c.id === id);
+  const msgCount = conv?.message_count ?? (S.activeConvId === id ? S.messages.length : null);
+  const countNote = msgCount != null ? `<p style="color:var(--text-muted);font-size:0.88em;margin-top:8px">${msgCount} message${msgCount !== 1 ? "s" : ""} in this conversation</p>` : "";
   showConfirmModal(
     {
       title: "Delete Conversation",
       message: "Are you sure you want to delete this conversation?",
       confirmText: "Delete",
+      extraHtml: countNote,
     },
     async () => {
       try {
@@ -337,11 +341,15 @@ async function deleteConversation(id) {
 }
 
 export async function deleteConversationFromModal(id) {
+  const conv = S.conversations.find((c) => c.id === id);
+  const msgCount = conv?.message_count ?? null;
+  const countNote = msgCount != null ? `<p style="color:var(--text-muted);font-size:0.88em;margin-top:8px">${msgCount} message${msgCount !== 1 ? "s" : ""} in this conversation</p>` : "";
   showConfirmModal(
     {
       title: "Delete Conversation",
       message: "Are you sure you want to delete this conversation?",
       confirmText: "Delete",
+      extraHtml: countNote,
     },
     async () => {
       try {

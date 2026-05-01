@@ -1340,7 +1340,9 @@ async def list_conversations() -> list[dict]:
             SELECT c.*,
                    (SELECT m.content FROM messages m
                     WHERE m.conversation_id = c.id
-                    ORDER BY m.id DESC LIMIT 1) AS last_message_preview
+                    ORDER BY m.id DESC LIMIT 1) AS last_message_preview,
+                   (SELECT COUNT(*) FROM messages m
+                    WHERE m.conversation_id = c.id) AS message_count
             FROM conversations c
             ORDER BY COALESCE(c.updated_at, c.created_at) DESC
         """

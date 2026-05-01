@@ -5,7 +5,10 @@ let _cs = null; // { img, scale, onConfirm, aspect, cx, cy, cw, ch, drag }
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if ($("modal-crop-root")?.innerHTML) { closeCropModal(); return; }
+  if ($("modal-crop-root")?.innerHTML) {
+    closeCropModal();
+    return;
+  }
   if ($("modal-root")?.innerHTML) closeModal();
 });
 

@@ -6,15 +6,7 @@ import { validate } from "./validate.js";
 import { renderMessages } from "./chat.js";
 
 // ── Theme
-const THEMES = [
-  "dark",
-  "halloween",
-  "dark_forest",
-  "ocean_depths",
-  "vintage_wood",
-  "parchment",
-  "deep_space",
-];
+const THEMES = ["dark", "halloween", "dark_forest", "ocean_depths", "vintage_wood", "parchment", "deep_space"];
 
 export function applyTheme(name) {
   if (!THEMES.includes(name)) name = "dark";

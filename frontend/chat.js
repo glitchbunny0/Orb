@@ -1055,6 +1055,13 @@ async function afterStream() {
     if (pendingUserMsg) patchPendingUserMessage(pendingUserMsg);
     patchParentUserMessage(lastMsg);
     updateContextCounter();
+    // Magic rewrite updates a message in-place, so subsequent messages survive on the
+    // backend but were hidden by streamCutoffIndex during streaming. Re-render if any
+    // are missing from the DOM.
+    const ct = $("chat-messages");
+    if (ct.querySelectorAll(".message[data-msg-id]").length < S.messages.length) {
+      renderMessages();
+    }
   } else {
     renderMessages();
   }

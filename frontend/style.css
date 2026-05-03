@@ -774,7 +774,7 @@ body {
   font-size: var(--font-prose-size);
   line-height: 1.65;
   min-height: 80px;
-  background: var(--bg-surface);
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 16px;
@@ -783,7 +783,7 @@ body {
 }
 
 .message.user .msg-edit-area textarea {
-  background: var(--accent-glow);
+  background: color-mix(in srgb, var(--accent-glow) 60%, var(--bg-deep));
   border-color: var(--accent-dim);
 }
 

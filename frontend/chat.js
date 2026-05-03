@@ -258,6 +258,10 @@ export function resetChatUI() {
 }
 
 export async function selectChar(id, source = "recent") {
+  if (S.isStreaming) {
+    toast("Stop generation before switching characters", true);
+    return;
+  }
   if (S.activeCharId === id || S._selectCharLock) return;
   S._selectCharLock = true;
   try {
@@ -299,6 +303,10 @@ export async function selectChar(id, source = "recent") {
 }
 
 export async function newConvForChar(id) {
+  if (S.isStreaming) {
+    toast("Stop generation before switching characters", true);
+    return;
+  }
   try {
     const oldWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
     const conv = await api.post("/conversations", { character_card_id: id });
@@ -316,6 +324,10 @@ export async function newConvForChar(id) {
 }
 
 export async function selectConversation(id) {
+  if (S.isStreaming) {
+    toast("Stop generation before switching conversations", true);
+    return;
+  }
   const oldWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
   S.activeConvId = id;
   S.lastDirectorData = null;

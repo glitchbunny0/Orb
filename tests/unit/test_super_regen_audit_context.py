@@ -142,6 +142,58 @@ async def test_no_audit_context_msgs_falls_back_to_prefix():
 
 
 @pytest.mark.asyncio
+async def test_super_regen_prior_history_still_scanned():
+    """The fix must be surgical: prior history messages (from before the turn
+    being regenerated) are still passed to the scanner; only the replaced
+    message itself is excluded."""
+    client = LLMClient("http://localhost:9999")
+
+    prior_msg = "He looked out the window. The city hummed below."
+    replaced_msg = "She spun around. Her breath caught. The room fell silent."
+
+    # prefix reflects extended_history: prior turn + the turn being replaced
+    prefix = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": prior_msg},
+        {"role": "user", "content": "original user"},
+        {"role": "assistant", "content": replaced_msg},
+    ]
+
+    # audit_context_msgs mirrors what handle_super_regenerate computes from
+    # history only: prior_msg is present, replaced_msg is not.
+    audit_context_msgs = [prior_msg]
+
+    captured_prev_msgs: list[list[str]] = []
+
+    def fake_contextual_audit(draft, phrase_bank, previous_assistant_msgs):
+        captured_prev_msgs.append(list(previous_assistant_msgs))
+        return _clean_report(), ""
+
+    with patch(
+        "backend.passes.editor.editor._run_contextual_audit",
+        new=fake_contextual_audit,
+    ):
+        async for _ in editor_pass(
+            client,
+            prefix=prefix,
+            effective_msg="[OOC: rewrite]",
+            draft="Some new draft.",
+            settings={"model_name": "test-model"},
+            phrase_bank=[],
+            audit_enabled=True,
+            length_guard=None,
+            enabled_tools={"editor_apply_patch": True},
+            audit_context_msgs=audit_context_msgs,
+        ):
+            pass
+
+    assert len(captured_prev_msgs) == 1
+    prev = captured_prev_msgs[0]
+    assert prior_msg in prev, "prior history message must still be scanned"
+    assert replaced_msg not in prev, "replaced message must be excluded from scan"
+
+
+@pytest.mark.asyncio
 async def test_super_regen_does_not_flag_replaced_message():
     """End-to-end shape of the super-regen fix: supplying audit_context_msgs that
     excludes the replaced message must result in a clean audit even when the

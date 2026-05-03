@@ -72,15 +72,41 @@ function _tokenizeSentences(text) {
   // are rarely followed directly by a capital letter.
   // Each token retains its terminating punctuation; the inter-sentence space stays with
   // the preceding token so round-tripping via join('') reproduces the original.
-  const raw = text.split(/(?<=[.!?]) +(?=[A-Z])|(?=\n)|\n+/);
+  //
+  // We split on newlines too, but we KEEP the \n inside the token (as the last character).
+  // Previously the regex-based split consumed/discarded newlines, which meant that when
+  // _mergeOps() merged consecutive equal ops a multiline quote could never be reassembled
+  // with its original line breaks — so the .quoted regex matched nothing. By preserving
+  // the newline character, _mergeOps() rebuilds "This is\na poem." verbatim, and the
+  // regex [^"]+ happily spans across the \n.
   const tokens = [];
-  for (let i = 0; i < raw.length; i++) {
-    const t = raw[i];
-    if (!t.length) continue;
-    // Re-attach one space if the original had an inter-sentence space here
-    const needsTrailingSpace = i < raw.length - 1 && !t.endsWith("\n") && raw[i + 1] && !raw[i + 1].startsWith("\n");
-    tokens.push(needsTrailingSpace ? t + " " : t);
+  let current = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    current += ch;
+
+    if (/[.!?]/.test(ch)) {
+      let j = i + 1;
+      while (j < text.length && text[j] === ' ') j++;
+      if (j < text.length && /[A-Z]/.test(text[j])) {
+        const spaces = j - (i + 1);
+        for (let k = 0; k < spaces; k++) {
+          current += text[i + 1 + k];
+        }
+        i += spaces;
+        tokens.push(current);
+        current = "";
+      }
+    }
+
+    if (ch === '\n') {
+      tokens.push(current);
+      current = "";
+    }
   }
+
+  if (current.length) tokens.push(current);
   return tokens.length > 0 ? tokens : [text];
 }
 

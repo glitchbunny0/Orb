@@ -112,11 +112,11 @@ async def test_editor_iteration_exception_propagates():
         nonlocal audit_call_count
         audit_call_count += 1
         if audit_call_count == 1:
-            # Initial audit: 2 issues so the loop starts
-            return _make_report(2), "audit text"
+            # Initial audit: 3 issues so the loop starts
+            return _make_report(3), "audit text"
         if audit_call_count == 2:
-            # Post-patch audit: 1 issue (progress made, so loop continues)
-            return _make_report(1), "audit text"
+            # Post-patch audit: 2 issues (progress made, so loop continues)
+            return _make_report(2), "audit text"
         # Any further calls mean the loop kept running after the LLM failure
         pytest.fail(
             f"_run_contextual_audit called {audit_call_count} times; "

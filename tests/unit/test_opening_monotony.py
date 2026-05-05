@@ -21,14 +21,14 @@ class TestTruePositives:
     """These MUST be detected."""
 
     def test_three_consecutive_same_first_word(self):
-        """He X. He Y. He Z."""
-        text = "He walked. He ran. He jumped."
+        """He W. He X. He Y. He Z."""
+        text = "He walked. He ran. He jumped. He skipped."
         result = detect_opening_monotony(text, n_words=1)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "he"
-        assert flagged.count == 3
-        assert flagged.max_run == 3
+        assert flagged.count == 4
+        assert flagged.max_run == 4
         assert flagged.fraction == 1.0
 
     def test_four_consecutive_same_first_word(self):
@@ -43,98 +43,103 @@ class TestTruePositives:
         assert flagged.fraction == 1.0
 
     def test_three_consecutive_same_two_words(self):
-        """He is X. He is Y. He is Z."""
-        text = "He is tall. He is strong. He is fast."
+        """He is W. He is X. He is Y. He is Z."""
+        text = "He is tall. He is strong. He is fast. He is quick."
         result = detect_opening_monotony(text, n_words=2)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "he is"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_mixed_case_and_punctuation(self):
         """Normalization should treat 'He', 'he', 'He!' as same."""
-        text = "He walked! he ran. He jumped?"
+        text = "He walked! he ran. He jumped? He skipped."
         result = detect_opening_monotony(text, n_words=1)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "he"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_repetition_within_longer_text(self):
-        """Three consecutive repeated openers surrounded by other sentences."""
+        """Four consecutive repeated openers surrounded by other sentences."""
         text = (
-            "The sky is blue. He walked. He ran. He jumped. "
+            "The sky is blue. He walked. He ran. He jumped. He skipped. "
             "The grass is green. She sang."
         )
         result = detect_opening_monotony(text, n_words=1)
         he_flag = [f for f in result.flagged_openers if f.opener == "he"]
         assert len(he_flag) == 1
-        assert he_flag[0].max_run == 3
+        assert he_flag[0].max_run == 4
 
     def test_repetition_across_paragraphs(self):
         """Consecutive sentences split by newlines."""
-        text = "He walked.\n\nHe ran.\n\nHe jumped."
+        text = "He walked.\n\nHe ran.\n\nHe jumped.\n\nHe skipped."
         result = detect_opening_monotony(text, n_words=1)
         assert len(result.flagged_openers) >= 1
-        assert result.flagged_openers[0].max_run == 3
+        assert result.flagged_openers[0].max_run == 4
 
     def test_long_sentences_same_first_three_words(self):
         """Longer sentences with identical first three words."""
         text = (
             "The quick brown fox jumps over the lazy dog. "
             "The quick brown fox sleeps all day. "
-            "The quick brown fox eats a rabbit."
+            "The quick brown fox eats a rabbit. "
+            "The quick brown fox chases the hen."
         )
         result = detect_opening_monotony(text, n_words=3)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "the quick brown"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_long_sentences_same_first_four_words(self):
         """Longer sentences with identical first four words."""
         text = (
             "In the beginning God created the heavens. "
             "In the beginning God created the earth. "
-            "In the beginning God created the light."
+            "In the beginning God created the light. "
+            "In the beginning God created the stars."
         )
         result = detect_opening_monotony(text, n_words=4)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "in the beginning god"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_default_n_words_detects_consecutive_first_word(self):
         """Default n_words=1 detects consecutive first-word repetition."""
         text = (
             "She is a very talented artist. "
             "She is a very skilled musician. "
-            "She is a very dedicated teacher."
+            "She is a very dedicated teacher. "
+            "She is a very hard worker."
         )
         result = detect_opening_monotony(text)  # default n_words=1
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "she"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_line_breaks_and_quotes(self):
         """Sentences with quotes, commas, extra spaces and newlines."""
         text = """He X, "dialogue".  He Y.
 
-He Z something."""
+He Z something.
+
+He W something."""
         result = detect_opening_monotony(text, n_words=1)
         assert len(result.flagged_openers) >= 1
         flagged = result.flagged_openers[0]
         assert flagged.opener == "he"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
     def test_run_in_middle_of_longer_sequence(self):
-        """Flag when the 3-in-a-row run is in the middle, not the start."""
-        text = "The cat slept. He walked. He ran. He jumped. The dog barked."
+        """Flag when the 4-in-a-row run is in the middle, not the start."""
+        text = "The cat slept. He walked. He ran. He jumped. He skipped. The dog barked."
         result = detect_opening_monotony(text, n_words=1)
         he_flag = [f for f in result.flagged_openers if f.opener == "he"]
         assert len(he_flag) == 1
-        assert he_flag[0].max_run == 3
+        assert he_flag[0].max_run == 4
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -146,7 +151,7 @@ class TestFalsePositives:
     """These should NOT be flagged."""
 
     def test_only_two_consecutive(self):
-        """Two identical openers in a row — below the threshold of 3."""
+        """Two identical openers in a row — below the threshold of 4."""
         text = "He walked. He ran. The cat slept."
         result = detect_opening_monotony(text, n_words=1)
         assert len(result.flagged_openers) == 0
@@ -170,14 +175,15 @@ class TestFalsePositives:
             "back in '19. Kid from out of state. He presents his ID, right? "
             'The card says..."\n\n'
             "He shifts his weight, his tone remaining as boring as a weather "
-            "report while he describes a sensory nightmare."
+            "report while he describes a sensory nightmare. "
+            "He waits for a response."
         )
         result = detect_opening_monotony(text, n_words=1)
         # After stripping dialogue, narration is: Henderson..., He doesn't look...,
-        # He rubs (attribution), He shifts — 3 consecutive 'he' sentences.
+        # He rubs (attribution), He shifts, He waits — 4 consecutive 'he' sentences.
         assert len(result.flagged_openers) >= 1
         assert result.flagged_openers[0].opener == "he"
-        assert result.flagged_openers[0].max_run >= 3
+        assert result.flagged_openers[0].max_run >= 4
 
     def test_different_openers(self):
         """No repetition at all."""
@@ -254,14 +260,14 @@ class TestEdgeCases:
 
     def test_flagged_sentences_are_the_run(self):
         """FlaggedOpener.sentences holds the consecutive run, not all occurrences."""
-        text = "He walked. The cat slept. He ran. He jumped. He tripped."
+        text = "He walked. The cat slept. He ran. He jumped. He tripped. He fell."
         result = detect_opening_monotony(text, n_words=1)
         he_flag = [f for f in result.flagged_openers if f.opener == "he"]
         assert len(he_flag) == 1
-        assert he_flag[0].max_run == 3
-        assert len(he_flag[0].sentences) == 3
+        assert he_flag[0].max_run == 4
+        assert len(he_flag[0].sentences) == 4
         # Total count includes the first "He walked." too
-        assert he_flag[0].count == 4
+        assert he_flag[0].count == 5
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -285,27 +291,29 @@ class TestAuditIntegration:
             "back in '19. Kid from out of state. He presents his ID, right? "
             'The card says..."\n\n'
             "He shifts his weight, his tone remaining as boring as a weather "
-            "report while he describes a sensory nightmare."
+            "report while he describes a sensory nightmare. "
+            "He waits for a response."
         )
         report = run_audit(text, [])
         assert len(report.monotony_result.flagged_openers) >= 1
         assert report.monotony_result.flagged_openers[0].opener == "he"
 
     def test_audit_flags_consecutive_narrative(self):
-        """Audit with default params: 3 consecutive 'He' sentences ARE flagged."""
+        """Audit with default params: 4 consecutive 'He' sentences ARE flagged."""
         from backend.passes.editor.audit import run_audit
 
         text = (
             "Henderson sighs, a long rattling sound. "
             "He walks to the window. "
             "He stares at the parking lot. "
-            "He says nothing for a long time."
+            "He says nothing for a long time. "
+            "He waits."
         )
         report = run_audit(text, [])
         assert len(report.monotony_result.flagged_openers) >= 1
         flagged = report.monotony_result.flagged_openers[0]
         assert flagged.opener == "he"
-        assert flagged.max_run == 3
+        assert flagged.max_run == 4
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ export const S = {
   magicInputMsgId: null,
   abortController: null,
   streamingContent: null,
+  contextSize: null,
   pendingUserMsg: null,
   attachments: [],
   wasAborted: false,

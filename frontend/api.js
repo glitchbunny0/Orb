@@ -27,3 +27,9 @@ export const api = {
     return this._req(p, { method: "POST", body: fd });
   },
 };
+
+export async function getContextSize(convId) {
+  const r = await fetch(`/api/conversations/${convId}/context-size`);
+  if (!r.ok) return null;
+  return r.json();
+}

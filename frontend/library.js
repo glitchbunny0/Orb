@@ -460,7 +460,7 @@ export function renderCharacters() {
       const av = c.has_avatar
         ? `<img src="${avatarUrl(c.id)}${bust}" onerror="this.parentElement.textContent='👤'">`
         : "👤";
-      const meta = esc((c.tags || []).slice(0, 2).join(", ") || c.source_format || "");
+      const meta = esc(c.creator_notes || (c.tags || []).slice(0, 2).join(", ") || c.source_format || "");
       const isActive = S.activeCharId === c.id;
       return `<div class="char-item${isActive ? " active" : ""}" onclick="selectChar('${c.id}', 'recent')">
       <div class="char-avatar-sm">${av}</div>
@@ -622,6 +622,7 @@ function charFormTabs(prefix, d, isEdit, worlds = []) {
       isEdit
         ? `
     <div id="${prefix}-tmisc" class="tab-content">
+      <div class="field"><label>Creator's Note</label><textarea id="${prefix}-creator-notes" rows="4">${esc(d.creator_notes || "")}</textarea></div>
       <div class="field">
         <label>Tags</label>
         <div class="lb-chip-wrap" id="${prefix}-tag-wrap" onclick="document.getElementById('${prefix}-tag-text')?.focus()"></div>
@@ -902,6 +903,7 @@ export async function saveCharEdit(id, exportAfter = false) {
     scenario: $("ce-scenario").value.trim(),
     first_mes: $("ce-first-mes").value.trim(),
     mes_example: $("ce-mes-example").value.trim(),
+    creator_notes: $("ce-creator-notes").value.trim(),
     system_prompt: $("ce-sysprompt").value.trim(),
     post_history_instructions: $("ce-posthist").value.trim(),
     tags: _pendingTags || [],
@@ -1001,6 +1003,7 @@ export async function saveImportedChar() {
     scenario: $("ce-scenario").value.trim(),
     first_mes: $("ce-first-mes").value.trim(),
     mes_example: $("ce-mes-example").value.trim(),
+    creator_notes: $("ce-creator-notes").value.trim(),
     system_prompt: $("ce-sysprompt").value.trim(),
     post_history_instructions: $("ce-posthist").value.trim(),
     tags: _pendingTags || [],
@@ -1260,8 +1263,8 @@ function renderCharBrowserListItem(c) {
   const av = c.has_avatar
     ? `<img src="${avatarUrl(c.id)}${bust}" onerror="this.parentElement.textContent='👤'">`
     : "👤";
-  const tags =
-    c.tags && c.tags.length ? `<div class="char-browser-list-tags">${esc(c.tags.slice(0, 6).join(", "))}</div>` : "";
+  const notes = c.creator_notes || (c.tags && c.tags.length ? c.tags.slice(0, 6).join(", ") : "");
+  const tags = notes ? `<div class="char-browser-list-tags">${esc(notes)}</div>` : "";
   return `
     <div class="char-browser-list-item" onclick="selectChar('${c.id}', 'library');closeModal()">
       <div class="char-browser-list-avatar">${av}</div>

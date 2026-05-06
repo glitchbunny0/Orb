@@ -30,6 +30,7 @@ MIGRATIONS: list[str] = [
     "0011_add_show_editor_diff",
     "0012_hide_streaming_until_baked",
     "0013_agent_endpoint",
+    "0014_progressive_director_state",
 ]
 
 

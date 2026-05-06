@@ -413,13 +413,15 @@ async def init_db():
                 swipe_index INTEGER NOT NULL DEFAULT 0,
                 is_active BOOLEAN NOT NULL DEFAULT 1,
                 parent_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+                progressive_fields TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS director_state (
                 conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
                 active_moods TEXT NOT NULL DEFAULT '[]',
-                keywords TEXT NOT NULL DEFAULT '[]'
+                keywords TEXT NOT NULL DEFAULT '[]',
+                progressive_fields TEXT NOT NULL DEFAULT '{}'
             );
 
             CREATE TABLE IF NOT EXISTS director_fragments (
@@ -440,6 +442,7 @@ async def init_db():
                 agent_raw_output TEXT,
                 tool_calls TEXT,
                 active_moods_after TEXT,
+                progressive_fields_after TEXT NOT NULL DEFAULT '{}',
                 injection_block TEXT,
                 agent_latency_ms INTEGER,
                 created_at TEXT NOT NULL
@@ -1475,6 +1478,8 @@ async def _get_path_to_leaf(cid: str, leaf_id: int) -> list[dict]:
             if not rows:
                 break
             msg = dict(rows[0])
+            raw_pf = msg.get("progressive_fields")
+            msg["progressive_fields"] = json.loads(raw_pf) if raw_pf else {}
             path.append(msg)
             current_id = msg.get("parent_id")
         path.reverse()
@@ -1536,6 +1541,7 @@ async def add_message(
     swipe_index: int = 0,
     parent_id: int | None = None,
     attachments: Optional[List[dict]] = None,
+    progressive_fields: dict | None = None,
 ) -> int:
     """Add a message. Returns the new message id.
     If attachments is provided, each dict must have keys:
@@ -1548,8 +1554,17 @@ async def add_message(
         now = datetime.now(timezone.utc).isoformat()
         try:
             cur = await db.execute(
-                "INSERT INTO messages (conversation_id, role, content, turn_index, swipe_index, is_active, parent_id, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-                (cid, role, content, turn_index, swipe_index, parent_id, now),
+                "INSERT INTO messages (conversation_id, role, content, turn_index, swipe_index, is_active, parent_id, progressive_fields, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (
+                    cid,
+                    role,
+                    content,
+                    turn_index,
+                    swipe_index,
+                    parent_id,
+                    json.dumps(progressive_fields or {}),
+                    now,
+                ),
             )
         except sqlite3.IntegrityError as e:
             raise ValueError(
@@ -1745,23 +1760,39 @@ async def get_director_state(cid: str) -> dict:
                 r["keywords"] = json.loads(r["keywords"])
             else:
                 r["keywords"] = []
+            # Handle progressive_fields column (may be missing in older DBs)
+            raw_pf = r.get("progressive_fields")
+            r["progressive_fields"] = json.loads(raw_pf) if raw_pf else {}
             return r
-        return {"conversation_id": cid, "active_moods": [], "keywords": []}
+        return {
+            "conversation_id": cid,
+            "active_moods": [],
+            "keywords": [],
+            "progressive_fields": {},
+        }
 
 
 async def update_director_state(
-    cid: str, active_moods: list, keywords: list | None = None
+    cid: str,
+    active_moods: list,
+    keywords: list | None = None,
+    progressive_fields: dict | None = None,
 ):
     async with get_db() as db:
         if keywords is not None:
             await db.execute(
-                "UPDATE director_state SET active_moods = ?, keywords = ? WHERE conversation_id = ?",
-                (json.dumps(active_moods), json.dumps(keywords), cid),
+                "UPDATE director_state SET active_moods = ?, keywords = ?, progressive_fields = ? WHERE conversation_id = ?",
+                (
+                    json.dumps(active_moods),
+                    json.dumps(keywords),
+                    json.dumps(progressive_fields or {}),
+                    cid,
+                ),
             )
         else:
             await db.execute(
-                "UPDATE director_state SET active_moods = ? WHERE conversation_id = ?",
-                (json.dumps(active_moods), cid),
+                "UPDATE director_state SET active_moods = ?, progressive_fields = ? WHERE conversation_id = ?",
+                (json.dumps(active_moods), json.dumps(progressive_fields or {}), cid),
             )
         await db.commit()
 
@@ -1777,17 +1808,19 @@ async def add_conversation_log(
     styles_after: list,
     injection: str,
     latency_ms: int,
+    progressive_fields: dict | None = None,
 ):
     async with get_db() as db:
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
-            "INSERT INTO conversation_logs (conversation_id, turn_index, agent_raw_output, tool_calls, active_moods_after, injection_block, agent_latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO conversation_logs (conversation_id, turn_index, agent_raw_output, tool_calls, active_moods_after, progressive_fields_after, injection_block, agent_latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 cid,
                 turn_index,
                 agent_raw,
                 json.dumps(tool_calls),
                 json.dumps(styles_after),
+                json.dumps(progressive_fields or {}),
                 injection,
                 latency_ms,
                 now,
@@ -1806,6 +1839,18 @@ async def get_moods_before_turn(cid: str, turn_index: int) -> list[str]:
         if rows and rows[0]["active_moods_after"]:
             return json.loads(rows[0]["active_moods_after"])
         return []
+
+
+async def get_progressive_fields_before_turn(cid: str, turn_index: int) -> dict:
+    """Return progressive_fields_after from the most recent log entry before turn_index."""
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            "SELECT progressive_fields_after FROM conversation_logs WHERE conversation_id = ? AND turn_index < ? ORDER BY turn_index DESC LIMIT 1",
+            (cid, turn_index),
+        )
+        if rows and rows[0]["progressive_fields_after"]:
+            return json.loads(rows[0]["progressive_fields_after"])
+        return {}
 
 
 async def get_conversation_logs(cid: str) -> list[dict]:

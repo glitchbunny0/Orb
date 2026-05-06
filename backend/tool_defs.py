@@ -25,23 +25,36 @@ _DIRECT_SCENE_DESCRIPTION = (
 )
 
 
-def build_direct_scene_tool(director_fragments: list[dict]) -> dict:
+def build_direct_scene_tool(
+    director_fragments: list[dict],
+    progressive_state: dict | None = None,
+) -> dict:
     """Build the direct_scene tool schema from enabled director fragments.
 
     Director fragments provide dynamic string/array parameters beyond the fixed
     moods and keywords fields. The returned dict is in OpenAI function-calling format.
+
+    For "progressive" fragments, the previous value (from progressive_state) is
+    appended to the description so the LLM can see what it wrote last turn.
     """
     properties: dict = {}
     required: list[str] = []
 
     for df in director_fragments:
         fid = df["id"]
-        if df["field_type"] == "array":
+        field_type = df["field_type"]
+        if field_type == "array":
             prop = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": df["description"],
             }
+        elif field_type == "progressive":
+            desc = df["description"]
+            prev = (progressive_state or {}).get(fid)
+            if prev:
+                desc = f"{desc} Previous value: {prev!r}"
+            prop = {"type": "string", "description": desc}
         else:
             prop = {"type": "string", "description": df["description"]}
         properties[fid] = prop

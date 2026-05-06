@@ -67,9 +67,11 @@ async def _run_pipeline(
     editor_reasoning_on = bool(reasoning_passes.get("editor", False))
 
     active_moods = director["active_moods"]
+    progressive_state: dict = director.get("progressive_fields", {})
     agent_raw, calls, latency = "", [], 0
     rewritten_msg: str | None = None
     extra_fields: dict = {}
+    progressive_fields: dict = {}
     effective_msg = user_message
 
     audit_enabled = (
@@ -134,6 +136,7 @@ async def _run_pipeline(
             reasoning_on=director_reasoning_on,
             lorebook_block=lorebook_block,
             model=agent_model,
+            progressive_state=progressive_state,
         ):
             if event["type"] == "reasoning":
                 yield {
@@ -149,6 +152,14 @@ async def _run_pipeline(
                     rewritten_msg,
                     extra_fields,
                 ) = event["result"]
+                progressive_ids = {
+                    df["id"]
+                    for df in director_fragments
+                    if df["field_type"] == "progressive"
+                }
+                progressive_fields = {
+                    k: v for k, v in extra_fields.items() if k in progressive_ids
+                }
         if rewritten_msg:
             effective_msg = rewritten_msg
             yield {
@@ -228,6 +239,7 @@ async def _run_pipeline(
             "resp_text": resp_text,
             "inj_block": inj_block,
             "extra_fields": extra_fields,
+            "progressive_fields": progressive_fields,
         },
     }
 
@@ -480,6 +492,10 @@ async def _prepare_regen_context(
         conversation_id, target["turn_index"] - 1
     )
     ctx["director"]["active_moods"] = moods_before
+    grandparent = next((m for m in reversed(history) if m["role"] == "assistant"), None)
+    ctx["director"]["progressive_fields"] = (
+        grandparent.get("progressive_fields") or {} if grandparent else {}
+    )
     user_msg_id = target["parent_id"]
     attachments = (
         await db.get_attachments_for_message(user_msg_id) if user_msg_id else []
@@ -500,6 +516,7 @@ async def _persist_result(
             conversation_id,
             res["active_moods"],
             res.get("extra_fields", {}).get("keywords"),
+            res.get("progressive_fields"),
         )
     if res.get("rewritten_msg") and user_msg_id:
         await db.update_message_content(user_msg_id, res["effective_msg"])
@@ -515,6 +532,7 @@ async def _persist_result(
             resp_text,
             turn_index,
             parent_id=user_msg_id,
+            progressive_fields=res.get("progressive_fields"),
         )
         await db.set_active_leaf(conversation_id, asst_id)
         return asst_id
@@ -546,6 +564,7 @@ async def _fallback_persist(
                 conversation_id,
                 res["active_moods"],
                 res.get("extra_fields", {}).get("keywords"),
+                res.get("progressive_fields"),
             )
         if res.get("rewritten_msg") and user_msg_id:
             await db.update_message_content(user_msg_id, res["effective_msg"])
@@ -694,6 +713,16 @@ async def handle_turn(
         if skip_user_persist and messages and messages[-1]["role"] == "user":
             history, user_msg_id = messages[:-1], messages[-1]["id"]
 
+        # Derive progressive_fields from the grandparent message node (branch-aware)
+        # rather than conversation_logs which are indexed by turn_index and can
+        # return data from a different branch after a branch switch.
+        grandparent = next(
+            (m for m in reversed(messages) if m["role"] == "assistant"), None
+        )
+        ctx["director"]["progressive_fields"] = (
+            grandparent.get("progressive_fields") or {} if grandparent else {}
+        )
+
         # Save user message BEFORE pipeline
         if not skip_user_persist:
             # Convert frontend attachment format to database format
@@ -738,6 +767,7 @@ async def handle_turn(
                 res["active_moods"],
                 res["inj_block"],
                 res["latency"],
+                res.get("progressive_fields"),
             )
 
         pipeline = _run_pipeline(

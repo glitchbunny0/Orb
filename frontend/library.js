@@ -314,6 +314,7 @@ export function showDirectorFragmentModal(fragId = null) {
         <select id="dir-frag-type">
           <option value="string" ${d.field_type === "string" ? "selected" : ""}>single</option>
           <option value="array" ${d.field_type === "array" ? "selected" : ""}>list</option>
+          <option value="progressive" ${d.field_type === "progressive" ? "selected" : ""}>progressive</option>
         </select>
       </div>
     </div>

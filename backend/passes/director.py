@@ -72,6 +72,7 @@ async def _director_pass(
     reasoning_on: bool = True,
     lorebook_block: str = "",
     model: str | None = None,
+    progressive_state: dict | None = None,
 ) -> AsyncIterator[dict]:
     """Yields reasoning dicts during each tool call, then a single done dict.
 
@@ -115,7 +116,9 @@ async def _director_pass(
 
     # Build base schemas, replacing the static direct_scene with the dynamic one.
     base_schemas = enabled_schemas(enabled_tools)
-    dynamic_direct_scene = build_direct_scene_tool(director_fragments)
+    dynamic_direct_scene = build_direct_scene_tool(
+        director_fragments, progressive_state
+    )
     tool_schemas = [
         dynamic_direct_scene if s["function"]["name"] == "direct_scene" else s
         for s in base_schemas
@@ -133,7 +136,13 @@ async def _director_pass(
     t0 = time.monotonic()
     for name in tool_names:
         tool_tail = build_tool_prompt(
-            name, user_message, active_moods, mood_fragments, reasoning_on=reasoning_on
+            name,
+            user_message,
+            active_moods,
+            mood_fragments,
+            reasoning_on=reasoning_on,
+            director_fragments=director_fragments,
+            progressive_state=progressive_state,
         )
         tail = (
             "___\n\n" + lorebook_block + "\n\n" if lorebook_block else ""

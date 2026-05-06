@@ -128,6 +128,8 @@ def build_tool_prompt(
     active_moods: list[str],
     mood_fragments: list[dict],
     reasoning_on: bool = False,
+    director_fragments: list[dict] | None = None,
+    progressive_state: dict | None = None,
 ) -> str:
     tool = TOOLS.get(tool_name)
     if not tool:
@@ -148,6 +150,14 @@ def build_tool_prompt(
         parts.append(
             f"Previously active moods: {moods}\n\nAvailable writing moods:\n{frags}"
         )
+        progressive_lines = [
+            f"* [{df['id']}] ({df['description']}): {(progressive_state or {}).get(df['id'])}"
+            for df in (director_fragments or [])
+            if df.get("field_type") == "progressive"
+            and (progressive_state or {}).get(df["id"])
+        ]
+        if progressive_lines:
+            parts.append("Progressive fields:\n" + "\n".join(progressive_lines))
         parts.append(
             f'User\'s next message (for context, take this into account when directing):\n"""{user_message}"""'
         )
@@ -250,6 +260,8 @@ def build_style_injection(
         label = df["injection_label"]
         if df["field_type"] == "array" and isinstance(val, list):
             parts.append(label + ":\n" + "\n".join(f"- {item}" for item in val))
+        elif df["field_type"] == "progressive":
+            parts.append(f"{label} ({df['description']}): {val}")
         else:
             parts.append(f"{label}: {val}")
 

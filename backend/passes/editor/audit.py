@@ -31,7 +31,7 @@ class AuditReport:
         cliche_result: DetectionResult,
         monotony_result: MonotonyResult,
         template_result: TemplateResult,
-        not_but_result: list[dict] = None,
+        not_but_result: list[dict] | None = None,
         structural_repetition_result: StructuralResult | None = None,
     ):
         self.cliche_result = cliche_result

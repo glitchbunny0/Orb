@@ -5,10 +5,11 @@ Tavern Cards, as defined by Character Card Spec V2:
     https://github.com/malfoyslastname/character-card-spec-v2
 """
 
+import binascii
 import io
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Type, Union, cast
 import dacite
 from dataclasses_json import dataclass_json, Undefined
 from PIL import Image, PngImagePlugin
@@ -108,7 +109,7 @@ class TavernCardV2:
 def extract_exif_data(image_path: str) -> Dict[str, Any]:
     img = Image.open(image_path)
     img.load()
-    return img.info
+    return {k: v for k, v in img.info.items() if isinstance(k, str)}
 
 
 def position_converter(data: Any) -> Any:
@@ -142,7 +143,7 @@ def parse(image_path: str) -> Union[TavernCardV2, TavernCardV1]:
         raw_json_bytes = base64.b64decode(metadata["chara"])
         raw_json_string = raw_json_bytes.decode("utf-8")
         logger.info(f"Decoded JSON string length: {len(raw_json_string)} chars")
-    except (TypeError, base64.binascii.Error) as e:
+    except (TypeError, binascii.Error) as e:
         logger.error(
             f"Invalid Tavern card format - 'chara' field is not valid base64: {e}"
         )
@@ -173,10 +174,10 @@ def parse(image_path: str) -> Union[TavernCardV2, TavernCardV1]:
 
     if is_v2:
         config = dacite.Config(
-            type_hooks={
+            type_hooks=cast(Dict[Type[Any], Any], {
                 PositionType: position_converter,
                 float: float_converter,
-            },
+            }),
             strict=False,
         )
         try:

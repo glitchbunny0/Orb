@@ -75,7 +75,7 @@ def build_prefix(
     char_scenario: str,
     mes_example: str = "",
     post_history_instructions: str = "",
-    messages: list[dict] = None,
+    messages: list[dict] | None = None,
     user_name: str = "User",
     user_description: str = "",
 ) -> list[dict]:

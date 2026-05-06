@@ -483,9 +483,10 @@ async def _prepare_regen_context(
     Also resets director moods to the pre-turn baseline.
     Returns ``(history, attachments)``.
     """
+    parent_id: int | None = user_msg.get("parent_id")
     history = (
-        await db._get_path_to_leaf(conversation_id, user_msg.get("parent_id"))
-        if user_msg.get("parent_id")
+        await db._get_path_to_leaf(conversation_id, parent_id)
+        if parent_id is not None
         else []
     )
     moods_before = await db.get_moods_before_turn(
@@ -960,9 +961,10 @@ async def handle_magic_rewrite(
             return
         target, user_msg = result
 
+        parent_id: int | None = user_msg.get("parent_id")
         history = (
-            await db._get_path_to_leaf(conversation_id, user_msg.get("parent_id"))
-            if user_msg.get("parent_id")
+            await db._get_path_to_leaf(conversation_id, parent_id)
+            if parent_id is not None
             else []
         )
 

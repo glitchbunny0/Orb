@@ -69,7 +69,7 @@ class LLMClient:
         messages: list[dict],
         model: str,
         tools: list[dict] | None = None,
-        tool_choice: str | None = None,
+        tool_choice: dict | str | None = None,
         **params,
     ) -> AsyncIterator[dict]:
         """Streaming completion. Yields reasoning deltas then the assembled message.
@@ -135,7 +135,7 @@ class LLMClient:
                 abort_wait = asyncio.create_task(self._abort.wait())
                 try:
                     while True:
-                        line_task = asyncio.create_task(aiter.__anext__())
+                        line_task = asyncio.ensure_future(aiter.__anext__())
                         try:
                             done, _ = await asyncio.wait(
                                 {line_task, abort_wait},

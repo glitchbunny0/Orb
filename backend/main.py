@@ -7,7 +7,7 @@ import base64
 import tempfile
 from contextlib import asynccontextmanager
 
-from typing import Annotated, Any, Optional, List
+from typing import Annotated, Any, AsyncGenerator, Optional, List, cast
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -117,7 +117,7 @@ app = FastAPI(title="Orb", lifespan=lifespan)
 
 # Active LLM generations keyed by conversation ID.
 # Populated when streaming starts; cleared when it ends or is aborted.
-_active_clients: dict[str, object] = {}
+_active_clients: dict[str, LLMClient] = {}
 
 
 @app.middleware("http")
@@ -1268,12 +1268,13 @@ class _CleanupStreamingResponse(StreamingResponse):
             # (e.g. client disconnected). This ensures the orchestrator's
             # finally block runs and saves any incomplete message.
             if hasattr(self.body_iterator, "aclose"):
+                gen = cast(AsyncGenerator[Any, None], self.body_iterator)
                 try:
-                    await asyncio.shield(self.body_iterator.aclose())
+                    await asyncio.shield(gen.aclose())
                 except asyncio.CancelledError:
                     # Shield was cancelled; try once more
                     try:
-                        await self.body_iterator.aclose()
+                        await gen.aclose()
                     except Exception:
                         pass
 

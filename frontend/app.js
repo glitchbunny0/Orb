@@ -107,7 +107,7 @@ import {
   handleTitleEditKey,
 } from "./chat.js";
 import { closeModal, switchTab, showConfirmModal, runConfirmCb, closeCropModal } from "./modal.js";
-import { toggleVoicePanel, setTtsVolume, setTtsAutoSpeak, setTtsDebugExpanded } from "./voice.js";
+import { toggleVoicePanel, setTtsVolume, setTtsVolumeLive, setTtsAutoSpeak, setTtsDebugExpanded } from "./voice.js";
 import {
   loadWorlds,
   renderWorldsSidebar,
@@ -365,6 +365,7 @@ Object.assign(window, {
   setCurrentTtsVolume,
   // voice
   toggleVoicePanel,
+  setTtsVolumeLive,
   setTtsVolume,
   setTtsAutoSpeak,
   setTtsDebugExpanded,

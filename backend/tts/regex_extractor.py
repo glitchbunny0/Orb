@@ -239,7 +239,16 @@ def regex_extract(
     segments = []  # list of (type, data) — type is "beat" or "text"
     pos = 0
 
+    # Mask quoted regions so asterisks inside "..." aren't treated as action beats.
+    # E.g. "I *really* mean it" — the *really* is emphasis, not a beat.
+    quoted_spans = set()
+    for qm in RE_QUOTED.finditer(cleaned):
+        quoted_spans.add((qm.start(), qm.end()))
+
     for m in RE_ASTERISK.finditer(cleaned):
+        # Skip asterisks that fall inside a quoted span
+        if any(qs <= m.start() and m.end() <= qe for qs, qe in quoted_spans):
+            continue
         # Text before this beat
         if m.start() > pos:
             segments.append(("text", cleaned[pos : m.start()]))

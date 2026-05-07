@@ -170,6 +170,12 @@ async def _run_pipeline(
 
     do_edit = audit_enabled or (length_guard_enabled and agent_on)
 
+    # When the agent runs on a separate model/endpoint, its KV cache is disjoint
+    # from the writer's.  Skip tool schemas and the OOC "no tools" notice from the
+    # writer call — neither is useful and both add unnecessary tokens.
+    agent_is_separate = agent_client is not None
+    writer_enabled_tools = {} if agent_is_separate else enabled_tools
+
     def _wrap(c):
         return _PlaceholderClient(c, user_name, char_name)
 
@@ -272,7 +278,7 @@ async def _run_pipeline(
     writer_content = build_writer_content(
         lorebook_block,
         inj_block,
-        enabled_tools,
+        writer_enabled_tools,
         effective_msg,
         attachments,
         length_guard_enforce,
@@ -283,7 +289,7 @@ async def _run_pipeline(
         writer_client,
         prefix,
         settings,
-        enabled_tools,
+        writer_enabled_tools,
         inj_block=inj_block,
         lorebook_block=lorebook_block,
         effective_msg=effective_msg,

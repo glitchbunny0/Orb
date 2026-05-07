@@ -36,13 +36,18 @@ class _KVCacheTracker:
         self._entries: list[dict] = []
 
     def record(
-        self, label: str, messages: list[dict], tools: list[dict] | None
+        self,
+        label: str,
+        messages: list[dict],
+        tools: list[dict] | None,
+        model: str = "",
     ) -> None:
         """Snapshot a single LLM call. Call once per pass (or per tool in the director)."""
         serialized = _serialize_prompt(messages, tools)
         self._entries.append(
             {
                 "label": label,
+                "model": model,
                 "serialized": serialized,
                 "total_chars": len(serialized),
                 "tools_names": (
@@ -61,18 +66,26 @@ class _KVCacheTracker:
         total_saved = 0
 
         for i, e in enumerate(self._entries):
-            if i == 0:
+            e_model = e.get("model", "")
+            prev = next(
+                (
+                    self._entries[j]
+                    for j in range(i - 1, -1, -1)
+                    if self._entries[j].get("model", "") == e_model
+                ),
+                None,
+            )
+            if prev is None:
                 overlap = 0
                 cache_note = "baseline"
             else:
-                prev_serialized = self._entries[i - 1]["serialized"]
+                prev_serialized = prev["serialized"]
                 overlap = _common_prefix_len(prev_serialized, e["serialized"])
                 if overlap > 0:
                     total_saved += overlap
                     pct = overlap / len(prev_serialized) * 100 if prev_serialized else 0
-                    prev_label = self._entries[i - 1]["label"]
                     cache_note = (
-                        f"HIT  overlap={overlap} ({pct:.1f}%)  vs [{i-1}] {prev_label}"
+                        f"HIT  overlap={overlap} ({pct:.1f}%)  vs {prev['label']!r}"
                     )
                 else:
                     cache_note = "BUST  no_overlap"

@@ -193,18 +193,12 @@ export async function setTtsAutoSpeak(checked) {
   await persistVoiceSettings({ tts_auto_speak: S.ttsAutoSpeak ? 1 : 0 });
 }
 
-export function setTtsDebugExpanded(open) {
-  S.ttsDebugExpanded = !!open;
-}
-
-export function openVoiceSettings() {
+export async function openVoiceSettings() {
   if (!S.activeCharId) return;
-  window.showCharEditModal(S.activeCharId);
-  // Switch to Voice tab after modal renders
-  requestAnimationFrame(() => {
-    const voiceTab = document.querySelector('.modal .tab[onclick*="ce-tvoice"]');
-    if (voiceTab) voiceTab.click();
-  });
+  await window.showCharEditModal(S.activeCharId);
+  // Modal is now in the DOM — click the Voice tab
+  const voiceTab = document.querySelector('.tab[onclick*="ce-tvoice"]');
+  if (voiceTab) voiceTab.click();
 }
 
 export function replayLastMessage() {

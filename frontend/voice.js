@@ -1,6 +1,12 @@
-import { api } from "./api.js";
 import { S } from "./state.js";
 import { $, esc, toast } from "./utils.js";
+import { api } from "./api.js";
+
+const _SVG =
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"';
+const ICON_PLAY = `<svg ${_SVG}><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+const ICON_STOP = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`;
+const ICON_REPLAY = `<svg ${_SVG}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>`;
 
 function clampVolume(value) {
   const n = Number(value);
@@ -29,55 +35,110 @@ export function renderVoicePanel() {
 
   const extracted = S.ttsExtractedText || "";
   const volumePct = Math.round(clampVolume(S.ttsVolume) * 100);
-  const hasNowPlaying = S.speakingMsgId || S.ttsLoading;
+  const isPlaying = !!S.speakingMsgId && !S.ttsLoading;
+  const isLoading = S.ttsLoading;
+  const isActive = isPlaying || isLoading;
   const duration = S.ttsDuration || 0;
   const current = S.ttsCurrentTime || 0;
+  const vp = S.ttsVoiceProfile;
+  const last = S.ttsLastPlayed;
+
+  // Show playback card when active OR when we have last-played info
+  const showPlayback = isActive || last;
 
   el.innerHTML = `
-    <div class="voice-block">
-      <div class="voice-row">
-        <span>Volume</span>
-        <span>${volumePct}%</span>
+    <div class="inspector-block">
+      <h4>Playback</h4>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);margin-bottom:6px">
+        <span>Volume</span><span id="voice-volume-pct" style="margin-left:auto">${volumePct}%</span>
       </div>
       <input class="voice-range" type="range" min="0" max="100" value="${volumePct}" oninput="setTtsVolumeLive(this.value)" onchange="setTtsVolume(this.value)">
-      <label class="voice-check-row">
-        <input type="checkbox" ${S.ttsAutoSpeak ? "checked" : ""} onchange="setTtsAutoSpeak(this.checked)">
-        <span>Auto-speak new messages</span>
-      </label>
     </div>
 
-    <div class="voice-block">
-      <div class="voice-section-title">Speech Extraction</div>
-      <div class="voice-help">Algorithmic regex extraction runs locally with no LLM call. Action beats and nonverbal tags are preserved when the selected backend supports them.</div>
+    <div class="tool-card ${S.ttsAutoSpeak ? "tool-on" : ""}">
+      <div class="tool-card-header">
+        <span class="tool-card-name">Auto-speak</span>
+        <label class="tog" onclick="event.stopPropagation()">
+          <input type="checkbox" ${S.ttsAutoSpeak ? "checked" : ""} onchange="setTtsAutoSpeak(this.checked)">
+          <span class="tog-slider"></span>
+        </label>
+      </div>
+      <div class="tool-card-desc">Automatically speak new character messages.</div>
     </div>
 
     ${
-      hasNowPlaying
-        ? `<div class="voice-block">
-             <div class="voice-section-title">Now Playing</div>
-             <div class="voice-now-label">${esc(S.ttsPlayingLabel || `Message #${S.speakingMsgId}`)}</div>
-             <div class="voice-progress-row">
-               <span>${formatTime(current)}</span>
-               <progress value="${current}" max="${duration || 1}"></progress>
-               <span>${duration ? formatTime(duration) : "--:--"}</span>
+      vp && vp.backend
+        ? `<div class="tool-card">
+             <div class="tool-card-header">
+               <span class="tool-card-name">Voice${vp.enabled ? "" : " (disabled)"}</span>
+               ${S.activeCharId ? `<button class="btn btn-sm" onclick="openVoiceSettings()">Edit</button>` : ""}
              </div>
-             <button class="btn btn-sm" onclick="stopSpeaking()">Stop</button>
+             <div class="tool-card-desc" style="font-family:var(--font-mono)">${esc(vp.backend)} · ${esc(vp.language || "en-US")} · ${esc(vp.voice_id || "default")}</div>
+           </div>`
+        : S.activeCharId
+          ? `<div class="tool-card">
+               <div class="tool-card-header">
+                 <span class="tool-card-name">Voice</span>
+                 <button class="btn btn-sm" onclick="openVoiceSettings()">Configure</button>
+               </div>
+               <div class="tool-card-desc">No voice configured for this character.</div>
+             </div>`
+          : ""
+    }
+
+    ${
+      showPlayback
+        ? `<div class="tool-card ${isActive ? "tool-on" : ""}" id="voice-now-playing">
+             <div class="tool-card-header">
+               <span class="tool-card-name">${isActive ? "Now Playing" : "Last Played"}</span>
+               ${
+                 isLoading
+                   ? `<span style="font-size:12px;color:var(--text-secondary)">Loading…</span>`
+                   : isPlaying
+                     ? `<button class="btn-icon" onclick="stopSpeaking()" title="Stop">${ICON_STOP}</button>`
+                     : `<button class="btn-icon" onclick="replayLastMessage()" title="Replay">${ICON_REPLAY}</button>`
+               }
+             </div>
+             <div class="tool-card-desc" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+               ${esc(isActive ? S.ttsPlayingLabel || `Message #${S.speakingMsgId}` : last?.label || "")}
+             </div>
+             <div class="voice-progress-row">
+               <span id="voice-time-current">${formatTime(isActive ? current : last?.duration || 0)}</span>
+               <progress id="voice-progress" value="${isActive ? current : last?.duration || 0}" max="${(isActive ? duration : last?.duration) || 1}"></progress>
+               <span id="voice-time-duration">${formatTime((isActive ? duration : last?.duration) || 0)}</span>
+             </div>
            </div>`
         : ""
     }
 
     ${
       extracted
-        ? `<details class="voice-block" ${S.ttsDebugExpanded ? " open" : ""} ontoggle="setTtsDebugExpanded(this.open)">
-             <summary class="voice-section-title" style="cursor:pointer">Extracted Speech via ${esc(S.ttsExtractionMethod || "regex")}</summary>
-             <pre class="voice-debug-text">${esc(extracted)}</pre>
-           </details>`
-        : `<div class="voice-block">
-             <div class="voice-section-title">Extracted Speech</div>
-             <div class="voice-help">No speech generated yet.</div>
+        ? `<div class="tool-card" style="cursor:pointer" onclick="this.querySelector('.script-body').style.display=this.querySelector('.script-body').style.display==='none'?'block':'none'">
+             <div class="tool-card-header">
+               <span class="tool-card-name">Speech Script</span>
+               <span style="font-size:11px;color:var(--text-secondary)">${extracted.split("\n").length} lines</span>
+             </div>
+             <div class="script-body" style="display:${S.ttsDebugExpanded ? "block" : "none"}">
+               <pre class="voice-debug-text">${esc(extracted)}</pre>
+             </div>
            </div>`
+        : ""
     }
   `;
+}
+
+export function refreshNowPlaying() {
+  const duration = S.ttsDuration || 0;
+  const current = S.ttsCurrentTime || 0;
+  const progress = $("voice-progress");
+  if (progress) {
+    progress.value = current;
+    progress.max = duration || 1;
+  }
+  const ct = $("voice-time-current");
+  if (ct) ct.textContent = formatTime(current);
+  const dt = $("voice-time-duration");
+  if (dt) dt.textContent = duration ? formatTime(duration) : "--:--";
 }
 
 export function toggleVoicePanel() {
@@ -104,6 +165,7 @@ export function toggleVoicePanel() {
       panel.classList.add("open");
       btn.classList.add("btn-active");
       renderVoicePanel();
+      _loadVoiceProfile();
     };
     if (switching) setTimeout(open, 180);
     else open();
@@ -114,7 +176,7 @@ export function setTtsVolumeLive(value) {
   const pct = Math.round(clampVolume(Number(value) / 100) * 100);
   S.ttsVolume = clampVolume(Number(value) / 100);
   if (window.setCurrentTtsVolume) window.setCurrentTtsVolume(S.ttsVolume);
-  const label = document.querySelector("#voice-panel-content .voice-row span:last-child");
+  const label = document.querySelector("#voice-volume-pct");
   if (label) label.textContent = `${pct}%`;
 }
 
@@ -133,4 +195,37 @@ export async function setTtsAutoSpeak(checked) {
 
 export function setTtsDebugExpanded(open) {
   S.ttsDebugExpanded = !!open;
+}
+
+export function openVoiceSettings() {
+  if (!S.activeCharId) return;
+  window.showCharEditModal(S.activeCharId);
+  // Switch to Voice tab after modal renders
+  requestAnimationFrame(() => {
+    const voiceTab = document.querySelector('.modal .tab[onclick*="ce-tvoice"]');
+    if (voiceTab) voiceTab.click();
+  });
+}
+
+export function replayLastMessage() {
+  if (!S.ttsLastPlayed?.msgId) return;
+  window.speakMessage(S.ttsLastPlayed.msgId);
+}
+
+export async function loadVoiceProfile() {
+  await _loadVoiceProfile();
+}
+
+async function _loadVoiceProfile() {
+  if (!S.activeCharId) {
+    S.ttsVoiceProfile = null;
+    renderVoicePanel();
+    return;
+  }
+  try {
+    S.ttsVoiceProfile = await api.get("/characters/" + S.activeCharId + "/voice-profile");
+  } catch {
+    S.ttsVoiceProfile = null;
+  }
+  renderVoicePanel();
 }

@@ -103,6 +103,7 @@ async def _run_pipeline(
     agent_prefix: list[dict] | None = None,
     user_name: str = "User",
     char_name: str = "",
+    conversation_id: str | None = None,
 ) -> AsyncIterator[dict]:
     """Three-pass pipeline: director → writer → editor.
 
@@ -190,7 +191,7 @@ async def _run_pipeline(
         else settings["model_name"]
     )
 
-    kv_tracker = _KVCacheTracker()
+    kv_tracker = _KVCacheTracker(conversation_id=conversation_id)
 
     # --- Director pass ---
     has_pre_writer_tools = any(
@@ -870,6 +871,7 @@ async def handle_turn(
             agent_prefix=agent_prefix,
             user_name=user_name,
             char_name=char_name,
+            conversation_id=conversation_id,
         )
         async for event in _consume_pipeline(
             pipeline,
@@ -935,6 +937,7 @@ async def handle_regenerate(
             agent_prefix=agent_prefix,
             user_name=user_name,
             char_name=char_name,
+            conversation_id=conversation_id,
         )
         async for event in _consume_pipeline(
             pipeline, conversation_id, settings, user_msg_id, target["turn_index"]
@@ -1023,6 +1026,7 @@ async def handle_super_regenerate(
             agent_prefix=agent_prefix,
             user_name=user_name,
             char_name=char_name,
+            conversation_id=conversation_id,
         )
         # Save result as a sibling of the original: same parent_id and turn_index.
         async for event in _consume_pipeline(

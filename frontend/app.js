@@ -107,7 +107,15 @@ import {
   handleTitleEditKey,
 } from "./chat.js";
 import { closeModal, switchTab, showConfirmModal, runConfirmCb, closeCropModal } from "./modal.js";
-import { toggleVoicePanel, setTtsVolume, setTtsVolumeLive, setTtsAutoSpeak, setTtsDebugExpanded } from "./voice.js";
+import {
+  toggleVoicePanel,
+  setTtsVolume,
+  setTtsVolumeLive,
+  setTtsAutoSpeak,
+  setTtsDebugExpanded,
+  openVoiceSettings,
+  replayLastMessage,
+} from "./voice.js";
 import {
   loadWorlds,
   renderWorldsSidebar,
@@ -369,6 +377,8 @@ Object.assign(window, {
   setTtsVolume,
   setTtsAutoSpeak,
   setTtsDebugExpanded,
+  openVoiceSettings,
+  replayLastMessage,
   // worlds / lorebook
   showCreateWorldModal,
   createWorld,

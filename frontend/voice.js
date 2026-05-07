@@ -39,7 +39,7 @@ export function renderVoicePanel() {
         <span>Volume</span>
         <span>${volumePct}%</span>
       </div>
-      <input class="voice-range" type="range" min="0" max="100" value="${volumePct}" oninput="setTtsVolume(this.value)">
+      <input class="voice-range" type="range" min="0" max="100" value="${volumePct}" oninput="setTtsVolumeLive(this.value)" onchange="setTtsVolume(this.value)">
       <label class="voice-check-row">
         <input type="checkbox" ${S.ttsAutoSpeak ? "checked" : ""} onchange="setTtsAutoSpeak(this.checked)">
         <span>Auto-speak new messages</span>
@@ -108,6 +108,14 @@ export function toggleVoicePanel() {
     if (switching) setTimeout(open, 180);
     else open();
   }
+}
+
+export function setTtsVolumeLive(value) {
+  const pct = Math.round(clampVolume(Number(value) / 100) * 100);
+  S.ttsVolume = clampVolume(Number(value) / 100);
+  if (window.setCurrentTtsVolume) window.setCurrentTtsVolume(S.ttsVolume);
+  const label = document.querySelector("#voice-panel-content .voice-row span:last-child");
+  if (label) label.textContent = `${pct}%`;
 }
 
 export async function setTtsVolume(value) {

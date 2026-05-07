@@ -1004,6 +1004,11 @@ export async function saveCharEdit(id, exportAfter = false) {
     };
     try {
       await api.put("/characters/" + id + "/voice-profile", voiceData);
+      // Refresh voice panel with updated profile
+      if (S.activeCharId === id) {
+        const { loadVoiceProfile } = await import("./voice.js");
+        loadVoiceProfile();
+      }
     } catch (e) {
       toast("Character saved, but voice profile failed: " + e.message, true);
       return;

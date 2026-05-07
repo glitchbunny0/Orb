@@ -20,7 +20,7 @@ import { renderCharacters, loadCharacters, refreshCharacters } from "./library.j
 import { activateAndPrioritizeWorld, deactivateWorld } from "./lorebooks.js";
 import { validate } from "./validate.js";
 import { requestSendPermission } from "./tabLock.js";
-import { renderVoicePanel } from "./voice.js";
+import { renderVoicePanel, refreshNowPlaying, loadVoiceProfile } from "./voice.js";
 
 function canStartGeneration() {
   if (S.isStreaming) return false;
@@ -260,6 +260,7 @@ export function resetChatUI() {
   S.messages = [];
   S.lastDirectorData = null;
   S.directorState = null;
+  S.ttsVoiceProfile = null;
   $("chat-title-text").textContent = "Select a character";
   $("chat-avatar").textContent = "📜";
   $("chat-input").disabled = true;
@@ -279,6 +280,7 @@ export async function selectChar(id, source = "recent") {
     const oldWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
     S.activeCharId = id;
     renderCharacters();
+    loadVoiceProfile();
     const existing = S.conversations.find((c) => c.character_card_id === id);
     if (existing) {
       // If selecting from library modal, bump conversation's updated_at
@@ -324,6 +326,7 @@ export async function newConvForChar(id) {
     await loadConversations();
     S.activeCharId = id;
     renderCharacters();
+    loadVoiceProfile();
     await selectConversation(conv.id);
     const newWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
     if (oldWorldId && oldWorldId !== newWorldId) {
@@ -346,6 +349,7 @@ export async function selectConversation(id) {
   if (conv?.character_card_id && S.activeCharId !== conv.character_card_id) {
     S.activeCharId = conv.character_card_id;
     renderCharacters();
+    loadVoiceProfile();
   }
   $("chat-title-text").textContent = conv ? conv.title || conv.character_name : "";
   const av = $("chat-avatar");
@@ -1785,6 +1789,14 @@ export function hideAvatarPopup() {
 let _currentAudio = null;
 
 function resetTtsPlaybackState() {
+  // Save last played info before clearing (for the "Last Played" card)
+  if (S.speakingMsgId) {
+    S.ttsLastPlayed = {
+      msgId: S.speakingMsgId,
+      label: S.ttsPlayingLabel || `Message #${S.speakingMsgId}`,
+      duration: S.ttsDuration || 0,
+    };
+  }
   S.speakingMsgId = null;
   S.ttsLoading = false;
   S.ttsCurrentTime = 0;
@@ -1828,13 +1840,13 @@ export async function speakMessageAction(msgId, opts = {}) {
 
     audio.onloadedmetadata = () => {
       S.ttsDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      renderVoicePanel();
+      refreshNowPlaying();
     };
 
     audio.ontimeupdate = () => {
       S.ttsCurrentTime = audio.currentTime || 0;
       S.ttsDuration = Number.isFinite(audio.duration) ? audio.duration : S.ttsDuration;
-      renderVoicePanel();
+      refreshNowPlaying();
     };
 
     audio.onended = () => {

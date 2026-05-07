@@ -63,8 +63,10 @@ export const S = {
   ttsVolume: 0.75, // audio playback volume, 0.0 - 1.0
   ttsExtractedText: "", // last extracted speech text, for debugging
   ttsExtractionMethod: "regex", // extraction method used for last generated speech
+  ttsVoiceProfile: null, // cached voice profile for active character
   ttsDebugExpanded: false,
   ttsPlayingLabel: "",
   ttsCurrentTime: 0,
   ttsDuration: 0,
+  ttsLastPlayed: null, // { msgId, label, duration } persists after playback ends
 };

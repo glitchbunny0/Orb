@@ -4,10 +4,37 @@ pipeline_utils.py — Shared helpers for the pipeline passes and orchestrator.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 from .llm_client import LLMClient
 from .prompt_builder import replace_placeholders
+
+
+class Macros(NamedTuple):
+    """Resolved {{user}}/{{char}} macro values for a conversation turn."""
+
+    user: str
+    char: str
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: dict,
+        char_name: str,
+        active_persona: dict | None = None,
+    ) -> "Macros":
+        user = (
+            active_persona.get("name", "User")
+            if active_persona
+            else settings.get("user_name", "User")
+        )
+        return cls(user=user, char=char_name)
+
+    def resolve(self, text: str) -> str:
+        return replace_placeholders(text, self.user, self.char)
+
+    def wrap_client(self, client: LLMClient) -> "_PlaceholderClient":
+        return _PlaceholderClient(client, self.user, self.char)
 
 
 class _PlaceholderClient(LLMClient):

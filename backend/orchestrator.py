@@ -19,7 +19,7 @@ from .prompt_builder import (
     compute_lorebook_injection_block,
 )
 from .kv_tracker import _KVCacheTracker
-from .pipeline_utils import extract_hyperparams, Macros
+from .utils import extract_hyperparams, Macros
 from .passes.director import _director_pass
 from .passes.writer import _writer_pass, build_writer_content
 from .passes.editor import editor_pass

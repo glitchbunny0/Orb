@@ -19,7 +19,7 @@ from ..tool_defs import (
     build_direct_scene_tool,
 )
 from ..prompt_builder import build_director_tool_prompt
-from ..pipeline_utils import extract_hyperparams, build_multimodal_content
+from ..utils import extract_hyperparams, build_multimodal_content
 
 logger = logging.getLogger(__name__)
 

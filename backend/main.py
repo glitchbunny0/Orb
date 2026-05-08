@@ -97,7 +97,7 @@ from .orchestrator import (
 )
 from .llm_client import LLMClient
 from .endpoint_profiles import profile_for
-from .pipeline_utils import Macros
+from .utils import Macros
 from . import tavern_cards
 from . import prompt_builder
 

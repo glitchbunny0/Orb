@@ -688,10 +688,6 @@ function charFormTabs(prefix, d, isEdit, worlds = []) {
         <input type="range" id="${prefix}-voice-pitch" min="0.5" max="2.0" step="0.1" value="1.0"
           oninput="document.getElementById('${prefix}-voice-pitch-val').textContent=this.value">
       </div>
-      <div class="field"><label>Character Speech Instructions <span style="font-size:11px;color:var(--text-muted)">(optional)</span></label>
-        <textarea id="${prefix}-voice-custom-prompt" rows="3" placeholder="Character-specific pronunciation/style hints for speech extraction…"></textarea>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Global speech extraction is configured in the Voice sidepanel.</div>
-      </div>
       <div class="field" style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-sm" onclick="previewVoice('${prefix}')">🔊 Preview</button>
         <span id="${prefix}-voice-preview-status" style="font-size:12px;color:var(--text-muted)"></span>
@@ -1569,8 +1565,6 @@ export async function loadVoiceProfileIntoTab(charId, prefix) {
         pitch.value = profile.pitch || 1.0;
         if (pitchVal) pitchVal.textContent = pitch.value;
       }
-      const customPrompt = $(prefix + "-voice-custom-prompt");
-      if (customPrompt) customPrompt.value = profile.speech_prompt || "";
       const apiUrl = $(prefix + "-voice-api-url");
       if (apiUrl) apiUrl.value = profile.api_url || "";
       const apiKey = $(prefix + "-voice-api-key");
@@ -1595,7 +1589,7 @@ export function saveVoiceProfileFromTab(charId, prefix) {
     language: $(prefix + "-voice-lang")?.value || "en",
     rate: parseFloat($(prefix + "-voice-speed")?.value || "1.0"),
     pitch: parseFloat($(prefix + "-voice-pitch")?.value || "1.0"),
-    speech_prompt: $(prefix + "-voice-custom-prompt")?.value || "",
+    speech_prompt: "",
     api_url: $(prefix + "-voice-api-url")?.value || "",
     api_key: $(prefix + "-voice-api-key")?.value || "",
     model: $(prefix + "-voice-model")?.value || "",

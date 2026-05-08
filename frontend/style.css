@@ -66,20 +66,6 @@ body {
   min-width: var(--tools-width);
 }
 
-#voice-panel {
-  width: 0;
-  min-width: 0;
-  background: var(--bg-primary);
-  border-left: 1px solid var(--border);
-  overflow: hidden;
-  transition: width .25s, min-width .25s;
-}
-
-#voice-panel.open {
-  width: var(--tools-width);
-  min-width: var(--tools-width);
-}
-
 /* ═══════════════════════════════════════════
    2. Sidebar
    ═══════════════════════════════════════════ */
@@ -1336,44 +1322,8 @@ body {
 .tools-inner::-webkit-scrollbar { width: 4px; }
 .tools-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-.voice-inner {
-  padding: 16px;
-  overflow-y: auto;
-  height: 100%;
-  width: var(--tools-width);
-}
-
-.voice-inner::-webkit-scrollbar { width: 4px; }
-.voice-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
 .voice-range {
   width: 100%;
-}
-
-.voice-progress-row {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-.voice-progress-row progress {
-  flex: 1;
-  height: 6px;
-}
-
-.voice-debug-text {
-  max-height: 150px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
-  margin: 8px 0;
 }
 
 .agent-master-row {
@@ -1550,6 +1500,109 @@ body {
 
 @keyframes gen-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════
+   6b. TTS Status Bar
+   ═══════════════════════════════════════════ */
+.tts-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  transition: height .3s ease, opacity .3s ease, border-top .3s ease;
+}
+.tts-bar.hidden {
+  height: 0;
+  opacity: 0;
+  border-top-color: transparent;
+}
+
+/* Loading: animated sliding gradient (matches gen-bar) */
+.tts-load-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: tts-bar-slide 1.8s ease-in-out infinite;
+}
+.tts-bar:not(.tts-loading) .tts-load-bar {
+  display: none;
+}
+@keyframes tts-bar-slide {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(350%); }
+}
+
+/* Playing: solid progress fill */
+.tts-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--accent);
+  transition: width 0.3s linear;
+}
+.tts-bar.tts-loading .tts-progress {
+  display: none;
+}
+
+/* Pulsing dot — loading only */
+.tts-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: tts-pulse 1.2s ease-in-out infinite;
+}
+.tts-bar:not(.tts-loading) .tts-dot {
+  display: none;
+}
+@keyframes tts-pulse {
+  0%, 100% { opacity: .3; transform: scale(.8); }
+  50%      { opacity: 1;  transform: scale(1.2); }
+}
+
+/* Speaker icon — playing state */
+.tts-icon-speak,
+.tts-icon-stop {
+  display: none;
+  flex-shrink: 0;
+}
+.tts-bar:not(.tts-loading) .tts-icon-speak {
+  display: inline-flex;
+  color: var(--accent);
+  animation: tts-pulse 1.2s ease-in-out infinite;
+}
+.tts-bar:not(.tts-loading):hover .tts-icon-speak {
+  display: none;
+}
+.tts-bar:not(.tts-loading):hover .tts-icon-stop {
+  display: inline-flex;
+  color: #e74c3c;
+}
+
+.tts-bar .tts-text {
+  flex: 0 0 auto;
+}
+
+.tts-bar:not(.tts-loading) {
+  cursor: pointer;
+}
+.tts-bar:not(.tts-loading):hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 /* ═══════════════════════════════════════════

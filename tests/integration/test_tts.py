@@ -181,6 +181,7 @@ async def test_speak_message_rejects_non_assistant_message(client, db):
         user_msg_id = cur.lastrowid
     await db.commit()
 
+    await client.put("/api/settings", json={"tts_enabled": 1})
     resp = await client.put(
         f"/api/characters/{char_id}/voice-profile",
         json={
@@ -198,6 +199,7 @@ async def test_speak_message_rejects_non_assistant_message(client, db):
 
 async def test_speak_message_rejects_disabled_voice_profile(client):
     char_id, cid, msg_id = await _create_tts_conversation(client)
+    await client.put("/api/settings", json={"tts_enabled": 1})
     resp = await client.put(
         f"/api/characters/{char_id}/voice-profile",
         json={
@@ -225,6 +227,7 @@ async def test_speak_message_synthesizes_and_reuses_cache(
     monkeypatch.setattr(tts_cache, "TTS_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(main, "get_adapter", lambda backend: adapter)
 
+    await client.put("/api/settings", json={"tts_enabled": 1})
     resp = await client.put(
         f"/api/characters/{char_id}/voice-profile",
         json={

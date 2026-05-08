@@ -1,10 +1,10 @@
-import { S } from "./state.js";
-import { $, esc, toast, avatarUrl } from "./utils.js";
 import { api } from "./api.js";
-import { showModal, closeModal, switchTab, showConfirmModal, showCropModal } from "./modal.js";
-import { resetChatUI, loadConversations } from "./chat.js";
-import { validate } from "./validate.js";
+import { loadConversations, resetChatUI } from "./chat.js";
 import { loadWorlds } from "./lorebooks.js";
+import { closeModal, showConfirmModal, showCropModal, showModal, switchTab } from "./modal.js";
+import { S } from "./state.js";
+import { $, avatarUrl, esc, toast } from "./utils.js";
+import { validate } from "./validate.js";
 
 // Pending avatar for the character create modal (cleared on submit or cancel)
 let _pendingAvatar = null;
@@ -1259,21 +1259,24 @@ function applySort(characters) {
     switch (sortBy) {
       case "name":
         return collator.compare(a.name, b.name);
-      case "time-added":
+      case "time-added": {
         // Use created_at descending (newest first)
         const aTime = a.created_at || "";
         const bTime = b.created_at || "";
         return bTime.localeCompare(aTime);
-      case "most-recent-chat":
+      }
+      case "most-recent-chat": {
         const aStat = stats.get(a.id);
         const bStat = stats.get(b.id);
         const aTs = aStat?.recentTimestamp || a.updated_at || a.created_at || "";
         const bTs = bStat?.recentTimestamp || b.updated_at || b.created_at || "";
         return bTs.localeCompare(aTs);
-      case "most-chats":
+      }
+      case "most-chats": {
         const aCount = stats.get(a.id)?.count || 0;
         const bCount = stats.get(b.id)?.count || 0;
         return bCount - aCount;
+      }
       default:
         return 0;
     }
@@ -1370,7 +1373,7 @@ const _BACKEND_FIELDS = {
 
 let _backendsCache = null;
 
-window.onVoiceBackendChange = async function (prefix) {
+window.onVoiceBackendChange = async (prefix) => {
   _updateFieldVisibility(prefix);
   // Auto-fill default API URL for backends that need one
   const backend = $(prefix + "-voice-backend")?.value || "";
@@ -1383,7 +1386,7 @@ window.onVoiceBackendChange = async function (prefix) {
   await Promise.all([_loadVoiceList(prefix), _loadModelList(prefix)]);
 };
 
-window.onVoiceLangChange = async function (prefix) {
+window.onVoiceLangChange = async (prefix) => {
   await _loadVoiceList(prefix);
 };
 
@@ -1482,7 +1485,7 @@ async function _loadVoiceList(prefix) {
   }
 }
 
-window.previewVoice = async function (prefix) {
+window.previewVoice = async (prefix) => {
   const statusEl = $(prefix + "-voice-preview-status");
   if (!statusEl) return;
   const backend = $(prefix + "-voice-backend")?.value || "edge";

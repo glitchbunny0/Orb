@@ -1598,7 +1598,6 @@ export function saveVoiceProfileFromTab(charId, prefix) {
     language: $(prefix + "-voice-lang")?.value || "en",
     rate: parseFloat($(prefix + "-voice-speed")?.value || "1.0"),
     pitch: parseFloat($(prefix + "-voice-pitch")?.value || "1.0"),
-    speech_prompt: "",
     api_url: $(prefix + "-voice-api-url")?.value || "",
     api_key: $(prefix + "-voice-api-key")?.value || "",
     model: $(prefix + "-voice-model")?.value || "",

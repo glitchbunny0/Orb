@@ -1706,7 +1706,7 @@ def _tts_cache_path(cid: str, msg_id: int, profile: dict, content: str = "") -> 
     fingerprint = hashlib.md5(
         f"{profile.get('backend', '')}|{profile.get('voice_id', '')}|"
         f"{profile.get('language', '')}|{profile.get('rate', '')}|{profile.get('pitch', '')}|"
-        f"{profile.get('speech_prompt', '')}|{profile.get('api_url', '')}|"
+        f"{profile.get('api_url', '')}|"
         f"{profile.get('model', '')}|{media_type}|{content}".encode()
     ).hexdigest()[:8]
     return os.path.join(TTS_CACHE_DIR, cid, f"{msg_id}_{fingerprint}.{ext}")

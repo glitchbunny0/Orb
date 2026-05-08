@@ -119,24 +119,6 @@ async def test_voice_profile_crud(client):
     assert resp.json()["voice_id"] == "en-US-AriaNeural"
 
 
-async def test_voice_profile_custom_prompt(client):
-    char = await client.post("/api/characters", json={"name": "Prompt Test Char"})
-    char_id = char.json()["id"]
-
-    resp = await client.put(
-        f"/api/characters/{char_id}/voice-profile",
-        json={
-            "backend": "edge",
-            "voice_id": "en-US-JennyNeural",
-            "speech_prompt": "Speak with a playful tone.",
-        },
-    )
-    assert resp.status_code == 200
-
-    resp = await client.get(f"/api/characters/{char_id}/voice-profile")
-    assert resp.json()["speech_prompt"] == "Speak with a playful tone."
-
-
 async def test_voice_profile_nonexistent_character(client):
     resp = await client.get("/api/characters/nonexistent-id/voice-profile")
     assert resp.status_code == 200  # Returns empty profile, not 404

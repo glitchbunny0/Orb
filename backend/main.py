@@ -177,6 +177,9 @@ class SettingsUpdate(BaseModel):
     agent_same_as_writer: Optional[bool] = None
     agent_endpoint_id: Optional[int] = None
     agent_shared_system_prompt: Optional[str] = None
+    tts_enabled: Optional[int] = None
+    tts_auto_speak: Optional[int] = None
+    tts_volume: Optional[float] = None
 
 
 class EndpointCreate(BaseModel):
@@ -1794,6 +1797,11 @@ async def api_speak_message(cid: str, msg_id: int):
     card_id = conv.get("character_card_id")
     if not card_id:
         raise HTTPException(400, "No character associated with this conversation")
+
+    # Check global TTS toggle
+    settings = await get_settings()
+    if not settings.get("tts_enabled"):
+        raise HTTPException(403, "TTS is disabled in settings")
 
     # Get voice profile
     profile = await get_voice_profile(card_id)

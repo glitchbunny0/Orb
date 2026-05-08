@@ -210,6 +210,7 @@ DEFAULT_SETTINGS = {
     "hide_streaming_until_baked": 0,
     "agent_same_as_writer": True,
     "agent_shared_system_prompt": "",
+    "tts_enabled": 0,
     "tts_auto_speak": 0,
     "tts_volume": 0.75,
 }
@@ -359,6 +360,7 @@ async def init_db():
                 agent_same_as_writer INTEGER NOT NULL DEFAULT 1,
                 agent_endpoint_id INTEGER REFERENCES endpoints(id) ON DELETE SET NULL,
                 agent_shared_system_prompt TEXT NOT NULL DEFAULT '',
+                tts_enabled INTEGER NOT NULL DEFAULT 0,
                 tts_auto_speak INTEGER NOT NULL DEFAULT 0,
                 tts_volume REAL NOT NULL DEFAULT 0.75
             );
@@ -667,6 +669,10 @@ async def init_db():
         if "agent_shared_system_prompt" not in existing_cols:
             await db.execute(
                 "ALTER TABLE settings ADD COLUMN agent_shared_system_prompt TEXT NOT NULL DEFAULT ''"
+            )
+        if "tts_enabled" not in existing_cols:
+            await db.execute(
+                "ALTER TABLE settings ADD COLUMN tts_enabled INTEGER NOT NULL DEFAULT 0"
             )
         if "tts_auto_speak" not in existing_cols:
             await db.execute(
@@ -1185,6 +1191,7 @@ async def update_settings(data: dict) -> dict:
             "agent_same_as_writer",
             "agent_endpoint_id",
             "agent_shared_system_prompt",
+            "tts_enabled",
             "tts_auto_speak",
             "tts_volume",
         ]

@@ -1,26 +1,26 @@
+import { api, speakMessage as apiSpeakMessage } from "./api.js";
+import { loadCharacters, refreshCharacters, renderCharacters } from "./library.js";
+import { activateAndPrioritizeWorld, deactivateWorld } from "./lorebooks.js";
+import { closeModal, showConfirmModal, showModal } from "./modal.js";
 import { S } from "./state.js";
+import { requestSendPermission } from "./tabLock.js";
 import {
   $,
+  avatarUrl,
+  convUrl,
   esc,
   formatBytes,
   formatProse,
   formatProseWithDiff,
-  sentenceDiff,
-  toast,
-  scrollToBottom,
-  scrollToMessage,
-  avatarUrl,
-  convUrl,
   formatRelativeDate,
   resolvePlaceholders,
+  scrollToBottom,
+  scrollToMessage,
+  sentenceDiff,
+  toast,
 } from "./utils.js";
-import { api, speakMessage as apiSpeakMessage } from "./api.js";
-import { showModal, closeModal, showConfirmModal } from "./modal.js";
-import { renderCharacters, loadCharacters, refreshCharacters } from "./library.js";
-import { activateAndPrioritizeWorld, deactivateWorld } from "./lorebooks.js";
 import { validate } from "./validate.js";
-import { requestSendPermission } from "./tabLock.js";
-import { renderVoicePanel, refreshNowPlaying, loadVoiceProfile } from "./voice.js";
+import { refreshTtsBar } from "./voice.js";
 
 function canStartGeneration() {
   if (S.isStreaming) return false;
@@ -109,7 +109,7 @@ function buildMsgToolbar(m) {
       : "";
 
   const speakBtn =
-    isAssistant && m.id
+    isAssistant && m.id && S.ttsEnabled
       ? S.speakingMsgId === m.id
         ? `<button class="btn-tts-active" onclick="stopSpeaking()" title="Stop speaking">${ICON_SPEAK}</button>`
         : S.ttsLoading && S.speakingMsgId === m.id
@@ -280,7 +280,6 @@ export async function selectChar(id, source = "recent") {
     const oldWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
     S.activeCharId = id;
     renderCharacters();
-    loadVoiceProfile();
     const existing = S.conversations.find((c) => c.character_card_id === id);
     if (existing) {
       // If selecting from library modal, bump conversation's updated_at
@@ -326,7 +325,6 @@ export async function newConvForChar(id) {
     await loadConversations();
     S.activeCharId = id;
     renderCharacters();
-    loadVoiceProfile();
     await selectConversation(conv.id);
     const newWorldId = (S.allCharacters || []).find((c) => c.id === S.activeCharId)?.world_id || null;
     if (oldWorldId && oldWorldId !== newWorldId) {
@@ -349,7 +347,6 @@ export async function selectConversation(id) {
   if (conv?.character_card_id && S.activeCharId !== conv.character_card_id) {
     S.activeCharId = conv.character_card_id;
     renderCharacters();
-    loadVoiceProfile();
   }
   $("chat-title-text").textContent = conv ? conv.title || conv.character_name : "";
   const av = $("chat-avatar");
@@ -1169,7 +1166,7 @@ async function afterStream() {
   scrollToBottom(true);
   refreshCharacters();
 
-  if (!wasAborted && S.ttsAutoSpeak && lastMsg?.role === "assistant" && lastMsg.id) {
+  if (!wasAborted && S.ttsEnabled && S.ttsAutoSpeak && lastMsg?.role === "assistant" && lastMsg.id) {
     speakMessageAction(lastMsg.id, { silentErrors: true });
   }
 }
@@ -1677,21 +1674,17 @@ export function clearRefineDiff() {
 export function toggleInspector() {
   const inspector = $("inspector");
   const toolsPanel = $("tools-panel");
-  const voicePanel = $("voice-panel");
   const btn = $("inspector-toggle");
   const toolsBtn = $("tools-panel-btn");
-  const voiceBtn = $("voice-panel-btn");
   const wasOpen = inspector.classList.contains("open");
-  const switching = !wasOpen && (toolsPanel.classList.contains("open") || voicePanel?.classList.contains("open"));
+  const switching = !wasOpen && toolsPanel.classList.contains("open");
 
   if (wasOpen) {
     inspector.classList.remove("open");
     btn.classList.remove("btn-active");
   } else {
     toolsPanel.classList.remove("open");
-    voicePanel?.classList.remove("open");
     toolsBtn.classList.remove("btn-active");
-    voiceBtn?.classList.remove("btn-active");
     const open = () => {
       inspector.classList.add("open");
       btn.classList.add("btn-active");
@@ -1789,19 +1782,10 @@ export function hideAvatarPopup() {
 let _currentAudio = null;
 
 function resetTtsPlaybackState() {
-  // Save last played info before clearing (for the "Last Played" card)
-  if (S.speakingMsgId) {
-    S.ttsLastPlayed = {
-      msgId: S.speakingMsgId,
-      label: S.ttsPlayingLabel || `Message #${S.speakingMsgId}`,
-      duration: S.ttsDuration || 0,
-    };
-  }
   S.speakingMsgId = null;
   S.ttsLoading = false;
   S.ttsCurrentTime = 0;
   S.ttsDuration = 0;
-  S.ttsPlayingLabel = "";
 }
 
 export function setCurrentTtsVolume(volume) {
@@ -1825,14 +1809,11 @@ export async function speakMessageAction(msgId, opts = {}) {
   S.ttsError = null;
   S.ttsCurrentTime = 0;
   S.ttsDuration = 0;
-  S.ttsPlayingLabel = msg ? `Message #${msgId}` : `Message #${msgId}`;
   refreshTtsMessageToolbars(previousMsgId, msgId);
-  renderVoicePanel();
+  refreshTtsBar();
 
   try {
-    const { audioUrl, extractedText, extractionMethod } = await apiSpeakMessage(S.activeConvId, msgId);
-    S.ttsExtractedText = extractedText || "";
-    S.ttsExtractionMethod = extractionMethod || "regex";
+    const { audioUrl } = await apiSpeakMessage(S.activeConvId, msgId);
 
     const audio = new Audio(audioUrl);
     audio.volume = Math.max(0, Math.min(1, S.ttsVolume ?? 0.75));
@@ -1840,13 +1821,13 @@ export async function speakMessageAction(msgId, opts = {}) {
 
     audio.onloadedmetadata = () => {
       S.ttsDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      refreshNowPlaying();
+      refreshTtsBar();
     };
 
     audio.ontimeupdate = () => {
       S.ttsCurrentTime = audio.currentTime || 0;
       S.ttsDuration = Number.isFinite(audio.duration) ? audio.duration : S.ttsDuration;
-      refreshNowPlaying();
+      refreshTtsBar();
     };
 
     audio.onended = () => {
@@ -1854,7 +1835,7 @@ export async function speakMessageAction(msgId, opts = {}) {
       resetTtsPlaybackState();
       _currentAudio = null;
       refreshTtsMessageToolbars(endedMsgId);
-      renderVoicePanel();
+      refreshTtsBar();
     };
 
     audio.onerror = () => {
@@ -1863,12 +1844,12 @@ export async function speakMessageAction(msgId, opts = {}) {
       S.ttsError = "Audio playback failed";
       _currentAudio = null;
       refreshTtsMessageToolbars(erroredMsgId);
-      renderVoicePanel();
+      refreshTtsBar();
     };
 
     S.ttsLoading = false;
     refreshTtsMessageToolbars(msgId);
-    renderVoicePanel();
+    refreshTtsBar();
     await audio.play();
   } catch (err) {
     const erroredMsgId = S.speakingMsgId;
@@ -1876,7 +1857,7 @@ export async function speakMessageAction(msgId, opts = {}) {
     S.ttsError = err.message || "TTS failed";
     _currentAudio = null;
     refreshTtsMessageToolbars(erroredMsgId);
-    renderVoicePanel();
+    refreshTtsBar();
     if (!opts.silentErrors) toast(S.ttsError, "error");
   }
 }
@@ -1889,5 +1870,5 @@ export function stopSpeaking() {
   }
   resetTtsPlaybackState();
   refreshTtsMessageToolbars(stoppedMsgId);
-  renderVoicePanel();
+  refreshTtsBar();
 }

@@ -24,7 +24,7 @@ from ...tool_defs import (
     enabled_schemas,
 )
 from ...prompt_builder import build_editor_prompt
-from ...pipeline_utils import extract_hyperparams
+from ...utils import extract_hyperparams
 
 logger = logging.getLogger(__name__)
 

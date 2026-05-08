@@ -5,7 +5,7 @@ and tool-call prompts for the orchestrator pipeline.
 
 from __future__ import annotations
 
-from .pipeline_utils import Macros
+from .utils import Macros
 from .tool_defs import (
     TOOLS,
     DIRECTOR_PREAMBLE,

@@ -10,7 +10,7 @@ from typing import AsyncIterator, List, Optional
 
 from ..llm_client import LLMClient, reasoning_cfg
 from ..tool_defs import enabled_schemas
-from ..pipeline_utils import extract_hyperparams, build_multimodal_content
+from ..utils import extract_hyperparams, build_multimodal_content
 
 logger = logging.getLogger(__name__)
 

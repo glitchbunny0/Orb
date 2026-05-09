@@ -591,7 +591,6 @@ function charFormTabs(prefix, d, isEdit, worlds = []) {
       <div class="tab" onclick="switchTab(this,'${prefix}-ts')">Scenario</div>
       <div class="tab" onclick="switchTab(this,'${prefix}-tm')">Messages</div>
       ${isEdit ? `<div class="tab" onclick="switchTab(this,'${prefix}-ta')">Advanced</div>` : ""}
-      ${isEdit ? `<div class="tab" onclick="switchTab(this,'${prefix}-tmisc')">Misc</div>` : ""}
     </div>
     <div id="${prefix}-tp" class="tab-content active">
       <div class="field"><label>Description</label><textarea id="${prefix}-desc" rows="5">${esc(d.description || "")}</textarea></div>
@@ -613,17 +612,6 @@ function charFormTabs(prefix, d, isEdit, worlds = []) {
       isEdit
         ? `
     <div id="${prefix}-ta" class="tab-content">
-      <div class="field"><label>System Prompt Override</label><textarea id="${prefix}-sysprompt" rows="3">${esc(d.system_prompt || "")}</textarea></div>
-      <div class="field"><label>Post-History Instructions</label><textarea id="${prefix}-posthist" rows="3">${esc(d.post_history_instructions || "")}</textarea></div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Source: ${esc(d.source_format)} · ID: ${esc(d.id)}</div>
-    </div>`
-        : ""
-    }
-    ${
-      isEdit
-        ? `
-    <div id="${prefix}-tmisc" class="tab-content">
-      <div class="field"><label>Creator's Note</label><textarea id="${prefix}-creator-notes" rows="4">${esc(d.creator_notes || "")}</textarea></div>
       <div class="field">
         <label>Tags</label>
         <div class="lb-chip-wrap" id="${prefix}-tag-wrap" onclick="document.getElementById('${prefix}-tag-text')?.focus()"></div>
@@ -635,6 +623,9 @@ function charFormTabs(prefix, d, isEdit, worlds = []) {
           ${worldOptions}
         </select>
       </div>
+      <div class="field"><label>Creator's Note</label><textarea id="${prefix}-creator-notes" rows="1">${esc(d.creator_notes || "")}</textarea></div>
+      <div class="field"><label>System Prompt Override</label><textarea id="${prefix}-sysprompt" rows="1">${esc(d.system_prompt || "")}</textarea></div>
+      <div class="field"><label>Post-History Instructions</label><textarea id="${prefix}-posthist" rows="1">${esc(d.post_history_instructions || "")}</textarea></div>
       ${
         d.character_book
           ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Imported card contains an embedded lorebook (${(d.character_book.entries || []).length} entries). It will be imported as a new lorebook unless you select one above.</div>`

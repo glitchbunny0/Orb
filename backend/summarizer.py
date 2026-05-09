@@ -8,7 +8,7 @@ DEFAULT_SUMMARY_INSTRUCTIONS = (
     "[OOC: Write a rich prose narrative summary of the story so far. "
     "Preserve significant dialogue verbatim in quotes. "
     "Record key story beats, milestones, and relationship developments. "
-    "Write in past tense. Be thorough — this will be the sole context for the story's continuation.]"
+    "Be thorough — this will be the sole context for the story's continuation.]"
 )
 
 _LLM_PARAMS = (
@@ -48,7 +48,9 @@ class ConversationSummarizer:
             macros,
             user_description,
         )
-        instructions = custom_instructions or DEFAULT_SUMMARY_INSTRUCTIONS
+        instructions = DEFAULT_SUMMARY_INSTRUCTIONS
+        if custom_instructions:
+            instructions += f"\n{custom_instructions}"
         return prefix + [{"role": "user", "content": instructions}]
 
     async def stream(

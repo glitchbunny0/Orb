@@ -100,6 +100,7 @@ from .endpoint_profiles import profile_for
 from .macros import Macros
 from . import tavern_cards
 from . import prompt_builder
+from .summarizer import ConversationSummarizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -296,6 +297,7 @@ class ConversationUpdate(BaseModel):
 
 class SummarizeRequest(BaseModel):
     keep_count: int  # must be one of 2, 4, 6, 8
+    custom_instructions: str | None = None
 
 
 class CompressRequest(BaseModel):
@@ -945,11 +947,13 @@ async def api_summarize_conversation(
 
     settings = await get_settings()
     char_name = conv.get("character_name", "Character") or "Character"
-    char_scenario = conv.get("character_scenario", "") or ""
-
     active_persona_id = settings.get("active_persona_id")
-    active_persona = await get_user_persona(active_persona_id) if active_persona_id else None
-    system_prompt, char_persona, mes_example = await resolve_char_context(conv, settings)
+    active_persona = (
+        await get_user_persona(active_persona_id) if active_persona_id else None
+    )
+    system_prompt, char_persona, mes_example = await resolve_char_context(
+        conv, settings
+    )
     macros = Macros.from_settings(settings, char_name, active_persona)
     user_description = (
         active_persona.get("description", "")
@@ -962,57 +966,32 @@ async def api_summarize_conversation(
         api_key=settings.get("api_key", ""),
         profile=profile_for(settings["endpoint_url"], settings.get("model_name", "")),
     )
-    client_ref = [client]
+    summarizer = ConversationSummarizer(client, settings)
+    llm_messages = summarizer.build_messages(
+        system_prompt,
+        char_persona,
+        conv.get("character_scenario", "") or "",
+        mes_example,
+        conv.get("post_history_instructions", ""),
+        history_slice,
+        macros,
+        user_description,
+        custom_instructions=data.custom_instructions,
+    )
 
     async def _gen():
-        prefix = prompt_builder.build_prefix(
-            system_prompt,
-            char_persona,
-            char_scenario,
-            mes_example,
-            conv.get("post_history_instructions", ""),
-            history_slice,
-            macros,
-            user_description,
-        )
-        llm_messages = prefix + [
-            {
-                "role": "user",
-                "content": (
-                    "[OOC: Write a rich prose narrative summary of the story so far. "
-                    "Preserve significant dialogue verbatim in quotes. "
-                    "Record key story beats, milestones, and relationship developments. "
-                    "Write in past tense. Be thorough — this will be the sole context for the story's continuation.]"
-                ),
-            }
-        ]
-
-        params = {
-            k: v
-            for k in [
-                "temperature",
-                "max_tokens",
-                "top_p",
-                "min_p",
-                "top_k",
-                "repetition_penalty",
-            ]
-            if (v := settings.get(k)) is not None
-        }
-
         try:
-            async for chunk in client.complete(
-                llm_messages, settings.get("model_name", ""), **params
+            async for delta in summarizer.stream(
+                llm_messages, settings.get("model_name", "")
             ):
-                if chunk["type"] == "content":
-                    yield {"event": "token", "data": chunk["delta"]}
+                yield {"event": "token", "data": delta}
             yield {"event": "done", "data": ""}
         except Exception as e:
             logger.error("Summarize error: %s", e)
             yield {"event": "error", "data": str(e)}
 
     return _CleanupStreamingResponse(
-        _sse_stream(_gen(), request, client_ref=client_ref, cid=cid),
+        _sse_stream(_gen(), request, client_ref=[client], cid=cid),
         media_type="text/event-stream",
     )
 

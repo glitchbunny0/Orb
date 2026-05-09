@@ -58,7 +58,8 @@ def cache_path(cid: str, msg_id: int, profile: dict, content: str = "") -> str:
         f"{profile.get('backend', '')}|{profile.get('voice_id', '')}|"
         f"{profile.get('language', '')}|{profile.get('rate', '')}|{profile.get('pitch', '')}|"
         f"{profile.get('api_url', '')}|"
-        f"{profile.get('model', '')}|{media_type}|{content}".encode()
+        f"{profile.get('model', '')}|{media_type}|{content}".encode(),
+        usedforsecurity=False,
     ).hexdigest()[:8]
     return os.path.join(TTS_CACHE_DIR, cid, f"{msg_id}_{fingerprint}.{ext}")
 

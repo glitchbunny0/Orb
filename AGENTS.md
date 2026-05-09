@@ -347,9 +347,9 @@ When running under Codex's filesystem/network sandbox, `aiosqlite` integration t
 
 ### Adding a New Director Fragment
 
-1. `POST /api/director-fragments` with `id`, `label`, `description`, `field_type`, `required`, `enabled`, `injection_label`, `sort_order`
-2. The fragment is automatically included in the `direct_scene` tool schema via `build_direct_scene_tool()` in `tool_defs.py`
-3. The Director LLM fills the field, it gets injected into the writer prompt via `build_style_injection()` in `prompt_builder.py`
+Adding Director Fragments is a **user-facing action** done from the UI (or via REST API). Default fragment values are seeded in `database.py` — updating defaults only requires a seed data change.
+
+Adding a new fragment **value type** (e.g., `progressive` fields that accumulate across turns) requires broader changes: DB schema, `tool_defs.py` tool schema, `prompt_builder.py` injection logic, and potentially `orchestrator.py` progressive field handling.
 
 ### Adding a New Pipeline Pass
 
@@ -389,32 +389,28 @@ When running under Codex's filesystem/network sandbox, `aiosqlite` integration t
 
 ## Gotchas and Pitfalls
 
-1. **No auto-context-compaction** — Conversations grow unbounded until the user manually triggers summarize+compress. Long conversations will eventually exceed the model's context window.
+1. **Message tree branching** — Messages use `parent_id` to form a tree. `conversations.active_leaf_id` marks the visible leaf. The API returns branch navigation metadata (branch_count, branch_index, prev/next IDs). Deleting a message cascades to all descendants.
 
-2. **Full active path sent every turn** — `get_messages_with_branch_info()` returns the active path (leaf to root). No sliding window or token budget management in the pipeline.
+2. **Streaming lifecycle** — SSE connections must be properly cleaned up. The `_CleanupStreamingResponse` wrapper handles client disconnects. The `stop` endpoint sets an abort flag checked between pipeline stages. The abort logic is complex (aborting mid-writer stream must also save partial output to DB) and may need an audit.
 
-3. **Message tree branching** — Messages use `parent_id` to form a tree. `conversations.active_leaf_id` marks the visible leaf. The API returns branch navigation metadata (branch_count, branch_index, prev/next IDs). Deleting a message cascades to all descendants.
+3. **Tool call parsing** — The Director pass parses JSON tool call arguments. Malformed JSON from the LLM can crash the pipeline. Error handling wraps these in try/except but edge cases exist.
 
-4. **Streaming lifecycle** — SSE connections must be properly cleaned up. The `_CleanupStreamingResponse` wrapper handles client disconnects. The `stop` endpoint sets an abort flag checked between pipeline stages.
+4. **SQLite + aiosqlite** — All DB operations are async via aiosqlite. No ORM — raw SQL in `database.py`. Migrations run sequentially by number prefix.
 
-5. **Tool call parsing** — The Director pass parses JSON tool call arguments. Malformed JSON from the LLM can crash the pipeline. Error handling wraps these in try/except but edge cases exist.
+5. **Endpoint profiles** — Middleware layer to handle unsupported params where the provider returns an error instead of ignoring them. Not every provider needs its own profile — only add one when a provider's API quirks require body transformation.
 
-6. **SQLite + aiosqlite** — All DB operations are async via aiosqlite. No ORM — raw SQL in `database.py`. Migrations run sequentially by number prefix.
+6. **Reasoning models** — Some models emit `reasoning_content` before `content`. The streaming handler separates these. `reasoning_enabled_passes` in settings controls which pipeline passes get reasoning enabled.
 
-7. **Endpoint profiles** — Different LLM providers need different request bodies. `endpoint_profiles.py` handles URL detection and body transformation. Adding a new provider may require a new profile.
+7. **Migrations are sequential** — New migrations must use the next number in sequence. They run at app startup via `run_pending()` in `backend/migrations/__init__.py`.
 
-8. **Reasoning models** — Some models (GLM-5.x, DeepSeek) emit `reasoning_content` before `content`. The streaming handler separates these. `reasoning_enabled_passes` in settings controls which pipeline passes get reasoning enabled.
+8. **Phrase bank format** — `phrase_bank.variants` is a JSON array of strings. The editor audit matches these against response text using case-insensitive regex.
 
-9. **Migrations are sequential** — New migrations must use the next number in sequence. They run at app startup via `run_pending()` in `backend/migrations/__init__.py`.
+9. **Lorebook scan depth** — Hard-coded to 6 messages (`LOREBOOK_SCAN_DEPTH` in `prompt_builder.py`). Only the last 6 messages are scanned for lorebook keyword matches.
 
-10. **Phrase bank format** — `phrase_bank.variants` is a JSON array of strings. The editor audit matches these against response text using case-insensitive regex.
+10. **Context size is approximate** — The `/api/conversations/{cid}/context-size` endpoint computes `chars / 3.5` per component (system prompt, persona, scenario, messages, director injection, lorebook, post-history). It's a rough estimate, not an exact token count.
 
-11. **Lorebook scan depth** — Hard-coded to 6 messages (`LOREBOOK_SCAN_DEPTH` in `prompt_builder.py`). Only the last 6 messages are scanned for lorebook keyword matches.
+11. **TTS regex extractor** — Splits text into speech/non-speech chunks using quotation marks. The `regex_extractor.py` handles edge cases (nested quotes, em-dashes) but isn't perfect for all writing styles. Only speech chunks are sent to the TTS backend.
 
-12. **Context size is approximate** — The `/api/conversations/{cid}/context-size` endpoint computes `chars / 3.5` per component (system prompt, persona, scenario, messages, director injection, lorebook, post-history). It's a rough estimate, not an exact token count.
+12. **Agent endpoint separation** — Both the Director and Editor can use separate endpoints from the Writer (`agent_endpoint_id` in settings). If `agent_same_as_writer` is true, they share. When using a separate endpoint, note that a different prompt caching mechanism applies, and the instruction prompt has a small difference. Make sure to check which endpoint you're targeting when modifying agent-related code.
 
-13. **TTS regex extractor** — Splits text into speech/non-speech chunks using quotation marks. The `regex_extractor.py` handles edge cases (nested quotes, em-dashes) but isn't perfect for all writing styles. Only speech chunks are sent to the TTS backend.
-
-14. **Agent endpoint separation** — Both the Director and Editor can use separate endpoints from the Writer (`agent_endpoint_id` in settings). If `agent_same_as_writer` is true, they share. When using a separate endpoint, note that a different prompt caching mechanism applies, and the instruction prompt has a small difference. Make sure to check which endpoint you're targeting when modifying agent-related code.
-
-15. **Macros resolve at different levels** — `resolve_message()` expands everything ({{user}}, {{char}}, inline macros like {{roll}}). `resolve_prompt()` only does {{user}}/{{char}} substitution. Use `resolve_prompt()` for historical messages where inline macros shouldn't fire.
+13. **Macros resolve at different levels** — `resolve_message()` expands everything ({{user}}, {{char}}, inline macros like {{roll}}). `resolve_prompt()` only does {{user}}/{{char}} substitution. Use `resolve_prompt()` for historical messages where inline macros shouldn't fire.

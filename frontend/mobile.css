@@ -175,6 +175,11 @@ body {
   #main {
     width: 100%;
   }
+
+  /* Recent Characters action buttons (edit/delete): always visible on mobile. */
+  .char-item-actions {
+    opacity: 1;
+  }
 }
 
 /* ── Tablet modal/layout tightening ── */

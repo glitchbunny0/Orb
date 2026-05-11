@@ -280,8 +280,8 @@ body {
 .char-item:hover .char-item-actions { opacity: 1; }
 
 .char-item-actions button {
-  font-size: 14px;
-  padding: 4px 8px;
+  font-size: 18px;
+  padding: 2px 6px;
   color: var(--text-muted);
 }
 

@@ -427,3 +427,5 @@ When running under Codex's filesystem/network sandbox, `aiosqlite` integration t
 12. **Agent endpoint separation** — Both the Director and Editor can use separate endpoints from the Writer (`agent_endpoint_id` in settings). If `agent_same_as_writer` is true, they share. When using a separate endpoint, note that a different prompt caching mechanism applies, and the instruction prompt has a small difference. Make sure to check which endpoint you're targeting when modifying agent-related code.
 
 13. **Macros resolve at different levels** — `resolve_message()` expands everything ({{user}}, {{char}}, inline macros like {{roll}}). `resolve_prompt()` only does {{user}}/{{char}} substitution. Use `resolve_prompt()` for historical messages where inline macros shouldn't fire.
+
+14. **Never bypass lefthook with `--no-verify`** — The pre-commit hook runs `black --line-length 128`, `biome format`, and `flake8`. If a hook fails, fix the issue. Do not bypass it. CI runs the same checks and will catch formatting drift. Dirty working tree files can produce flake8 warnings that don't exist in committed code — verify before assuming a hook failure is legitimate.

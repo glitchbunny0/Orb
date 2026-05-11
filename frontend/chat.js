@@ -1637,8 +1637,12 @@ const REASONING_PASSES = [
 function _advanceReasoningPass(targetIdx) {
   if (targetIdx <= S.reasoningPassActive) return;
   S.reasoningPassActive = targetIdx;
-  S.reasoningPassSelected = targetIdx; // auto-switch view to the new pass
-  S.reasoningUserOverride = false; // reset so in-pass tokens don't fight the user
+  const targetKey = REASONING_PASSES[targetIdx]?.key;
+  const targetEnabled = targetKey && S.reasoningEnabled[targetKey] !== false;
+  if (targetEnabled) {
+    S.reasoningPassSelected = targetIdx; // auto-switch view to the new pass
+    S.reasoningUserOverride = false; // reset so in-pass tokens don't fight the user
+  }
   const existing = document.getElementById("reasoning-section");
   if (existing) _refreshReasoningSection();
 }

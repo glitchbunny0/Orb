@@ -650,7 +650,7 @@ body {
   border-radius: 2px;
   transition: background 0.15s ease;
 }
-.message .msg-body .quoted[data-chunk-idx] { cursor: pointer; }
+.message.assistant .msg-body .quoted { cursor: pointer; }
 .message .msg-body pre {
   background: var(--bg-surface);
   border: 1px solid var(--border);

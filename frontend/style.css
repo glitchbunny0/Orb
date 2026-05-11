@@ -650,7 +650,7 @@ body {
   border-radius: 2px;
   transition: background 0.15s ease;
 }
-.message.assistant .msg-body .quoted { cursor: pointer; }
+body.tts-enabled .message.assistant .msg-body .quoted { cursor: pointer; }
 .message .msg-body pre {
   background: var(--bg-surface);
   border: 1px solid var(--border);

@@ -1,4 +1,11 @@
-import { api, speakMessage as apiSpeakMessage } from "./api.js";
+import {
+  api,
+  getContextSize,
+  speakMessage as apiSpeakMessage,
+  stopConversation,
+  streamPost,
+  summarizeConversation,
+} from "./api.js";
 import { loadCharacters, refreshCharacters, renderCharacters } from "./library.js";
 import { activateAndPrioritizeWorld, deactivateWorld } from "./lorebooks.js";
 import { closeModal, showConfirmModal, showModal } from "./modal.js";
@@ -525,7 +532,7 @@ export function cancelCompression() {
     _compressAbort.abort();
     _compressAbort = null;
   }
-  if (S.activeConvId) fetch(`/api/conversations/${S.activeConvId}/stop`, { method: "POST" }).catch(() => {});
+  if (S.activeConvId) stopConversation(S.activeConvId);
   closeModal();
 }
 
@@ -570,12 +577,11 @@ export async function generateCompressionSummary() {
   let summaryText = "";
 
   try {
-    const resp = await fetch(`/api/conversations/${S.activeConvId}/summarize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keep_count: _compressKeepCount, custom_instructions: customInstructions }),
-      signal: _compressAbort.signal,
-    });
+    const resp = await summarizeConversation(
+      S.activeConvId,
+      { keepCount: _compressKeepCount, customInstructions },
+      _compressAbort.signal,
+    );
 
     if (!resp.ok) {
       const detail = await resp.text();
@@ -823,12 +829,6 @@ function refreshTtsMessageToolbars(...msgIds) {
 
 function updateContextCounter() {
   fetchContextSize();
-}
-
-async function getContextSize(convId) {
-  const r = await fetch(`/api/conversations/${convId}/context-size`);
-  if (!r.ok) return null;
-  return r.json();
 }
 
 async function fetchContextSize() {
@@ -1089,7 +1089,7 @@ function setStreaming(active) {
 export function stopGeneration() {
   if (S.abortController) S.abortController.abort();
   if (S.activeConvId) {
-    fetch("/api" + convUrl(S.activeConvId, "stop"), { method: "POST" }).catch(() => {});
+    stopConversation(S.activeConvId);
   }
 }
 
@@ -1458,7 +1458,7 @@ function agentPayload() {
   return { enable_agent: S.agentEnabled };
 }
 
-async function runStreamRequest(url, body, cutoffMsgId = null) {
+async function runStreamRequest(path, body, cutoffMsgId = null) {
   setStreaming(true);
   setGenerationPhase("pending");
   $("send-btn").disabled = true;
@@ -1476,12 +1476,7 @@ async function runStreamRequest(url, body, cutoffMsgId = null) {
   scrollToBottom();
   S.abortController = new AbortController();
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: S.abortController.signal,
-    });
+    const resp = await streamPost(path, body, S.abortController.signal);
     await processSSEStream(resp, ct, msgDiv, S.abortController.signal);
   } catch (e) {
     if (e.name === "AbortError") S.wasAborted = true;
@@ -1497,7 +1492,7 @@ export async function continueFromUser() {
     toast("Last message is not a user message", true);
     return;
   }
-  await runStreamRequest("/api" + convUrl(S.activeConvId, "continue"), agentPayload());
+  await runStreamRequest(convUrl(S.activeConvId, "continue"), agentPayload());
 }
 
 // ── Send Message
@@ -1552,12 +1547,11 @@ export async function sendMessage() {
 
   S.abortController = new AbortController();
   try {
-    const resp = await fetch("/api" + convUrl(S.activeConvId, "send"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, attachments, ...agentPayload() }),
-      signal: S.abortController.signal,
-    });
+    const resp = await streamPost(
+      convUrl(S.activeConvId, "send"),
+      { content, attachments, ...agentPayload() },
+      S.abortController.signal,
+    );
     await processSSEStream(resp, ct, msgDiv, S.abortController.signal);
   } catch (e) {
     if (e.name === "AbortError") {
@@ -1572,17 +1566,13 @@ export async function sendMessage() {
 // ── Regenerate
 export async function regenerate(msgId) {
   if (!S.activeConvId || !canStartGeneration()) return;
-  await runStreamRequest("/api" + convUrl(S.activeConvId, "messages", msgId, "regenerate"), agentPayload(), msgId);
+  await runStreamRequest(convUrl(S.activeConvId, "messages", msgId, "regenerate"), agentPayload(), msgId);
 }
 
 // ── Super Regenerate
 export async function superRegenerate(msgId) {
   if (!S.activeConvId || !canStartGeneration()) return;
-  await runStreamRequest(
-    "/api" + convUrl(S.activeConvId, "messages", msgId, "super_regenerate"),
-    agentPayload(),
-    msgId,
-  );
+  await runStreamRequest(convUrl(S.activeConvId, "messages", msgId, "super_regenerate"), agentPayload(), msgId);
 }
 
 // ── Magic Rewrite
@@ -1630,7 +1620,7 @@ export async function submitMagicRewrite(msgId) {
   if (!direction) return;
   if (!S.activeConvId || !canStartGeneration()) return;
   S.magicInputMsgId = null;
-  await runStreamRequest("/api" + convUrl(S.activeConvId, "messages", msgId, "magic_rewrite"), { direction }, msgId);
+  await runStreamRequest(convUrl(S.activeConvId, "messages", msgId, "magic_rewrite"), { direction }, msgId);
 }
 
 // ── Inspector — Reasoning stepper rail

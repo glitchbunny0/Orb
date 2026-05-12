@@ -223,6 +223,7 @@ body {
   .char-browser-grid,
   .char-browser-list {
     max-height: 52vh;
+    overflow-y: auto;
   }
 
   /* Character create/edit modal: stop inner content forcing horizontal overflow. */

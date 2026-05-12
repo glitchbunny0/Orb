@@ -1426,7 +1426,7 @@ function renderInternetResultsBody() {
 
 function renderInternetResultCard(item) {
   const av = item.avatar_url
-    ? `<img src="${esc(item.avatar_url)}" loading="lazy" onerror="this.parentElement.textContent='👤'">`
+    ? `<img src="${item.avatar_url.replace(/"/g, "&quot;")}" onerror="this.parentElement.textContent='👤'">`
     : "👤";
   const fullPath = (item.full_path || "").replace(/'/g, "\\'");
   const topics = (item.topics || []).slice(0, 12);

@@ -4,7 +4,7 @@ Orb's notable features:
 
 | Feature | Summary |
 |---|---|
-| [Customizability](customizability.md) | Prompt injection automatically used by the Director model |
+| [Writer Direction](director.md) | Prompt injection automatically used by the Director model |
 | [Anti-slop](anti-slop.md) | Remove overused words, phrases, and LLM-pattern boilerplate |
 | [Length Guard](length-guard.md) | Active or passive protection against length degradation |
 | [Super-regenerate](super-regenerate.md) | Ask for a different take instead of a samey regen |

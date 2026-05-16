@@ -1,4 +1,4 @@
-# Customizability
+# Director
 
 Customizable prompt injection that's automatically used by the Director model.
 

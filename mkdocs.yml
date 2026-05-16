@@ -68,7 +68,7 @@ nav:
   - Getting Started: getting-started.md
   - Features:
       - features/index.md
-      - Customizability: features/customizability.md
+      - Writer Direction: features/director.md
       - Anti-slop: features/anti-slop.md
       - Length Guard: features/length-guard.md
       - Super-regenerate: features/super-regenerate.md

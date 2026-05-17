@@ -239,5 +239,12 @@ PRE_WRITER_TOOLS = {"rewrite_user_prompt"}
 POST_WRITER_TOOLS = {"editor_apply_patch", "editor_rewrite"}
 
 
-def enabled_schemas(enabled_tools: dict) -> list[dict]:
-    return [TOOLS[n]["schema"] for n in TOOLS if enabled_tools.get(n, False)]
+def enabled_schemas(enabled_tools: dict, overrides: dict[str, dict] | None = None) -> list[dict]:
+    """Return tool schemas for enabled tools, in TOOLS registry order.
+
+    ``overrides`` replaces named schemas with dynamic variants so every pass
+    sends a byte-identical tools blob; any mismatch breaks the KV cache at
+    the tools position in the chat template.
+    """
+    overrides = overrides or {}
+    return [s for n in TOOLS if enabled_tools.get(n, False) if (s := overrides.get(n, TOOLS[n]["schema"])) is not None]

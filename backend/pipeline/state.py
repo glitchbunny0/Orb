@@ -1,21 +1,27 @@
 """
 state.py — The per-turn contract dataclasses shared across passes.
 
-These three dataclasses are the turn-state contract every pass reads: the
-orchestrator builds them and the director / writer / editor passes consume them.
-They live here — a focused leaf the passes point *down* into — rather than at the
-top in ``orchestrator.py``, so the dependency runs one direction (passes →
-pipeline_state) instead of the passes reaching up into the coordinator.
+``ModelLane`` / ``_PipelineConfig`` / ``TurnState`` are the turn-state contract
+every pass reads: the orchestrator builds them and the director / writer / editor
+passes consume them. They live here — a focused leaf the passes point *down* into
+— rather than at the top in ``orchestrator.py``, so the dependency runs one
+direction (passes → ``state``) instead of the passes reaching up into the
+coordinator.
 
 Only the dataclass *shapes* live here. Their construction and behaviour
-(``_resolve_pipeline_config``, ``_make_result``, ``is_dual_model``, …) stay in
-``orchestrator.py``; ``_PipelineResult`` likewise stays there, being
-pipeline-internal and not consumed by any pass.
+(``_resolve_pipeline_config`` in ``config.py``, ``_make_result`` in
+``orchestrator.py``, ``is_dual_model`` in ``predicates.py``, …) stay with their
+callers. ``_PipelineResult`` is the one exception that moved *in*: it is the
+terminal result contract produced by ``orchestrator._make_result`` and consumed
+by ``persistence._consume_pipeline``. Once production and consumption split
+across two modules it stopped being "pipeline-internal to one file" and became a
+shared contract — so it joins the other per-turn shapes here, the neutral home
+both importers point down into.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Mapping
 
 from ..core import ContentPart
@@ -108,3 +114,44 @@ class TurnState:
     reasoning_writer: str = ""
     reasoning_editor: str = ""
     feedback_values: dict = field(default_factory=dict)
+
+
+@dataclass
+class _PipelineResult:
+    """Terminal payload of the pipeline's internal ``_result`` event: the final
+    draft plus everything the persistence path needs.
+
+    It crosses the SSE hop as a plain dict (``as_event_data()``) so the
+    ``_result`` event stays JSON-shaped for tests and inspectors, then is rebuilt
+    into this typed form by ``persistence._consume_pipeline`` before the persist
+    helpers read it. Every field defaults, so a turn aborted before ``_result``
+    ever fires (or a test injecting a partial payload) still produces a usable
+    instance via the bare ``_PipelineResult()`` seed in ``_consume_pipeline``.
+
+    Built from a :class:`TurnState` by ``orchestrator._make_result``; the
+    result-bound ``TurnState`` field names mirror these so one name follows each
+    value from the director pass through to persistence.
+    """
+
+    active_moods: list[str] = field(default_factory=list)
+    agent_raw: str = ""
+    calls: list[dict] = field(default_factory=list)
+    latency: int = 0
+    rewritten_msg: str | None = None
+    effective_msg: str = ""
+    resp_text: str = ""
+    inj_block: str = ""
+    extra_fields: dict = field(default_factory=dict)
+    progressive_fields: dict = field(default_factory=dict)
+    reasoning_director: str = ""
+    reasoning_writer: str = ""
+    reasoning_editor: str = ""
+    feedback: dict = field(default_factory=dict)
+    staged_attachments: list[dict] = field(default_factory=list)
+    staged_message_state: dict = field(default_factory=dict)
+
+    def as_event_data(self) -> dict:
+        """Shallow field dict for the ``_result`` SSE envelope. Shallow on
+        purpose: ``staged_attachments`` carries raw artifact bytes that must not
+        be deep-copied."""
+        return {f.name: getattr(self, f.name) for f in fields(self)}

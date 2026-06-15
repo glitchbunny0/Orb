@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import backend.database as dbmod
-from backend.pipeline.orchestrator import handle_turn
+from backend.pipeline import handle_turn
 
 
 async def _drain(agen) -> list[dict]:

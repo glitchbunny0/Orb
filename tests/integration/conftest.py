@@ -98,15 +98,16 @@ def llm_mock(monkeypatch):
     enough -- the route modules that construct a client
     (``backend.api.routes.conversations`` for /summarize and
     ``backend.api.routes.workflows`` for the workflow hooks) and
-    ``backend.pipeline.orchestrator`` retain pre-patch references. The
-    fixture patches every bound name.
+    ``backend.pipeline.context`` (which builds the writer/agent clients in
+    ``_load_pipeline_context``) retain pre-patch references. The fixture
+    patches every bound name.
     """
     fake = FakeLLMClient()
     factory = llm_factory(fake)
     monkeypatch.setattr("backend.inference.client.LLMClient", factory)
     monkeypatch.setattr("backend.api.routes.conversations.LLMClient", factory)
     monkeypatch.setattr("backend.api.routes.workflows.LLMClient", factory)
-    monkeypatch.setattr("backend.pipeline.orchestrator.LLMClient", factory)
+    monkeypatch.setattr("backend.pipeline.context.LLMClient", factory)
     return fake
 
 

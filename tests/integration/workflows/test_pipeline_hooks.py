@@ -19,10 +19,10 @@ from backend.database import (
     set_active_leaf,
 )
 from backend.inference import LLMClient, _KVCacheTracker
-from backend.pipeline.orchestrator import (
-    _consume_pipeline,
+from backend.pipeline.orchestrator import _run_pipeline
+from backend.pipeline.persistence import _consume_pipeline
+from backend.pipeline.workflow_bridge import (
     _iterate_pre_pipeline_hooks,
-    _run_pipeline,
     _stage_workflow_attachment,
 )
 

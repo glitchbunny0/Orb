@@ -24,7 +24,7 @@ graph TD
     end
 
     subgraph Backend ["Backend (FastAPI + SQLite)"]
-        orch["handle_turn() in pipeline/orchestrator.py"]
+        orch["handle_turn() in pipeline/entrypoints.py"]
 
         dir["Director Pass (pipeline/passes/director/) — pre-writer phase (optional)<br/>Runs the enabled PRE_WRITER_TOOLS, each as its own LLM call:<br/>1. rewrite_user_prompt (optional) → rewrites vague user messages<br/>2. direct_scene → fills fragments<br/>Fragments are user-defined (interactive_fragments table),<br/>except moods (mood_fragments table).<br/>Returns: moods, plot_summary, keywords, next_event,<br/>writing_direction, detected_repetitions, etc."]
         writer["Writer Pass (pipeline/passes/writer.py)<br/>Main generation pass. System prompt + history +<br/>Lorebook entries + Scene Direction injection block + user message.<br/>Streams response tokens via SSE."]
@@ -73,16 +73,35 @@ Orb/
 │   │       ├── settings.py  endpoints.py  conversations.py  messages.py
 │   │       ├── characters.py  fragments.py  worlds.py  phrase_bank.py
 │   │       └── personas.py  presets.py  workflows.py  stats.py  misc.py
-│   ├── pipeline/            # PIPELINE LAYER — the Director→Writer→Editor turn engine
+│   ├── pipeline/            # PIPELINE LAYER — the Director→Writer→Editor turn engine.
+│   │   │                    # The turn lifecycle is split into single-purpose modules
+│   │   │                    # (deps run strictly downward, predicates is the leaf):
+│   │   │                    #   entrypoints → {context, orchestrator, persistence, config}
+│   │   │                    #   context/orchestrator → workflow_bridge → {workflows,…}
+│   │   │                    #   {config, context, persistence} → predicates / state
 │   │   ├── __init__.py      # Facade: handle_turn, handle_regenerate, handle_fork_edit,
-│   │   │                    # handle_super_regenerate, handle_magic_rewrite, resolve_persona_id,
-│   │   │                    # agent_enabled, TurnState/ModelLane/_PipelineConfig
-│   │   ├── orchestrator.py  # Pipeline orchestration: handle_turn, _run_pipeline,
-│   │   │                    # _make_result (projects TurnState → _result SSE event);
-│   │   │                    # builds the per-turn contracts defined in state.py
+│   │   │                    # handle_super_regenerate, handle_magic_rewrite (from entrypoints);
+│   │   │                    # resolve_persona_id, agent_enabled (from predicates);
+│   │   │                    # TurnState/ModelLane/_PipelineConfig (from state)
+│   │   ├── entrypoints.py   # TOP INTEGRATOR (pipeline's mirror of api/): the 5 public
+│   │   │                    # handle_* + _generate_reply driver (setup→pipeline→persist)
+│   │   │                    # + regen helpers (_resolve_target_and_parent/_prepare_regen_context)
+│   │   ├── orchestrator.py  # The three-pass coordinator: _run_pipeline (director→writer→
+│   │   │                    # editor + POST_PIPELINE hooks) + _make_result (TurnState → _result)
+│   │   ├── context.py       # Inbound: PipelineContext + _load_pipeline_context (builds the
+│   │   │                    # LLM clients — tests patch context.LLMClient), _build_prefix(es),
+│   │   │                    # _compute_lorebook, _TurnSetup + _prepare_turn (pre-pipeline setup)
+│   │   ├── config.py        # Per-turn resolution: _resolve_pipeline_config (lanes + flags),
+│   │   │                    # _build_writer_tools_blob, _split_interactive_fragments
+│   │   ├── persistence.py   # Outbound: _consume_pipeline + _persist_*/_fallback_*/_shielded_*
+│   │   │                    # + _conversation_log_writer
+│   │   ├── workflow_bridge.py # The pipeline↔workflows seam: _iterate_pre_pipeline_hooks +
+│   │   │                    # _run_post_pipeline + _stage_workflow_attachment + _PostPipelineResult
+│   │   ├── predicates.py    # Dependency-free leaf (the package's core/): agent_enabled,
+│   │   │                    # is_dual_model, resolve_persona_id
 │   │   ├── state.py         # Per-turn contract dataclasses (was pipeline_state.py):
-│   │   │                    # ModelLane, _PipelineConfig, TurnState (mutable per-turn
-│   │   │                    # bag threaded through stages). Passes import down into here.
+│   │   │                    # ModelLane, _PipelineConfig, TurnState (mutable per-turn bag
+│   │   │                    # threaded through stages), _PipelineResult. Passes import here.
 │   │   └── passes/
 │   │       ├── director/    # Director pass package
 │   │       │   ├── __init__.py  # Re-exports: DirectorResult, director_pass, director_stage,
@@ -238,7 +257,7 @@ api  →  {pipeline, features}  →  workflows  →  {inference, analysis}  → 
 - **`database/`** — a foundation that *may read* `core` (e.g. `queries/workflow_attachments.py` uses `core.utils.scrub_log`) and is read by every layer above, but **never imports up**.
 - **`inference/`** — LLM transport + prompt/tool assembly; depends only on `core`.
 - **`analysis/`** — pure prose-quality detection; depends only on `database.models` (+ stdlib). Sits below `workflows` and `pipeline`, parallel to `inference`. It exists so the auditor can be shared by both the editor pass *and* `workflows/toolkit` without a `workflows → pipeline` back-edge.
-- **`workflows/`** — the plugin-registry gold standard; sits *below* `pipeline/` and *above* `inference`/`analysis`. `pipeline/orchestrator.py` imports it; it imports only `inference`, `analysis`, `core`, `database` — all downward.
+- **`workflows/`** — the plugin-registry gold standard; sits *below* `pipeline/` and *above* `inference`/`analysis`. `pipeline/workflow_bridge.py` imports it (the single pipeline↔workflows seam); it imports only `inference`, `analysis`, `core`, `database` — all downward.
 - **`pipeline/`** — the Director→Writer→Editor turn engine + its per-turn contracts (`state.py`) + its passes.
 - **`features/`** — vertical slices (`cards`, `summarization`, `presets`), each self-contained.
 - **`api/`** — the HTTP layer at the top; the only layer that wires everything together.
@@ -521,7 +540,7 @@ flowchart TD
 
 Multiple model configs per endpoint. Active one selected via `endpoints.active_model_config_id`. Agent (Director) can use a separate endpoint (`agent_endpoint_id`) or share the writer's.
 
-**Persona resolution.** `settings.active_persona_id` is only the *global default*. The effective persona for a turn is resolved by `resolve_persona_id()` (`pipeline/orchestrator.py`) top-down: conversation pin (`conversations.persona_lock_id`) → character pin (`character_cards.persona_lock_id`) → global default. The frontend mirror is `effectivePersonaId()` in `utils.js`. Pins are managed from the user menu (`settings_personas.js`); see [docs/features/persona-pinning.md](docs/features/persona-pinning.md).
+**Persona resolution.** `settings.active_persona_id` is only the *global default*. The effective persona for a turn is resolved by `resolve_persona_id()` (`pipeline/predicates.py`) top-down: conversation pin (`conversations.persona_lock_id`) → character pin (`character_cards.persona_lock_id`) → global default. The frontend mirror is `effectivePersonaId()` in `utils.js`. Pins are managed from the user menu (`settings_personas.js`); see [docs/features/persona-pinning.md](docs/features/persona-pinning.md).
 
 **Director feature flags** (not model-callable tools, so they live in their own `settings` columns like the length guard — see *Adding a Feature Flag* below): `agentic_lorebook_enabled` lets the Director pick lorebook entries from a catalog instead of the keyword scan ([docs/features/agentic-lorebook.md](docs/features/agentic-lorebook.md)), and `feedback_enabled` gates the post-writer `give_feedback` step that surfaces `feedback`-type fragments to the user ([docs/features/feedback-fragments.md](docs/features/feedback-fragments.md)).
 
@@ -549,8 +568,8 @@ Because the writer's KV cache now lives on a different server than the agent pas
 
 ### Where it lives in code
 
-- **Resolution** — `_load_pipeline_context()` in `pipeline/orchestrator.py` builds `agent_client` and `agent_system_prompt` only when `not agent_same_as_writer and agent_endpoint_id`; `_build_prefixes()` builds the separate `agent_prefix`.
-- **Routing** — the Director and Editor run on `agent_client or client` with `agent_prefix or prefix`; when `agent_client` is set, `writer_enabled_tools` is forced to `{}` (`pipeline/orchestrator.py`).
+- **Resolution** — `_load_pipeline_context()` in `pipeline/context.py` builds `agent_client` and `agent_system_prompt` only when `not agent_same_as_writer and agent_endpoint_id`; `_build_prefixes()` (also `context.py`) builds the separate `agent_prefix`.
+- **Routing** — the Director and Editor run on `agent_client or client` with `agent_prefix or prefix`; when `agent_client` is set, `writer_enabled_tools` is forced to `{}` in `_resolve_pipeline_config()` (`pipeline/config.py`).
 - **Config** — `settings.agent_same_as_writer`, `settings.agent_endpoint_id`, `settings.agent_shared_system_prompt`, and `endpoints.agent_active_model_config_id`.
 - **UI** — Settings → Endpoints → **Agent** section → "Same as Writer" toggle (`frontend/settings.js`). Unchecking reveals the agent endpoint/model fields and warns if they exactly match the writer's (which would make the split pointless).
 
@@ -657,4 +676,4 @@ See [docs/architecture/secondary-workflow.md](docs/architecture/secondary-workfl
 
 9. **Lorebook scan depth** — Hard-coded to 6 messages (`LOREBOOK_SCAN_DEPTH` in `inference/prompt_builder.py`). Only the last 6 messages are scanned for lorebook keyword matches.
 
-10. **Macros resolve at different levels** — `resolve_message()` expands everything ({{user}}, {{char}}, inline macros like {{roll}}). `resolve_prompt()` only does {{user}}/{{char}} substitution. Use `resolve_prompt()` for historical messages where inline macros shouldn't fire. `core/macros.py` is a **dependency-free leaf** (it imports nothing else in the codebase — like `database/models.py` and `core/llm_types.py`): it transforms strings and message dicts, and knows nothing about the LLM client. The transport-boundary catch-all that scrubs `{{user}}`/`{{char}}` from *every* outgoing message (the director's tool prompt embeds user-authored fragment text that can carry `{{char}}`) is `Macros.resolve_prompt_messages`. It is **bound** as the `CachedBase.resolve` hook in `pipeline/orchestrator.py` (`resolve=macros.resolve_prompt_messages`, where `macros` is a local `Macros` instance) and **applied** inside `inference/cached_call.py` — to `[*prefix, *trailing]` right before the call, so the KV tracker snapshots the exact resolved bytes sent. There is **no** macro-resolving `LLMClient` subclass/wrapper; don't reintroduce one.
+10. **Macros resolve at different levels** — `resolve_message()` expands everything ({{user}}, {{char}}, inline macros like {{roll}}). `resolve_prompt()` only does {{user}}/{{char}} substitution. Use `resolve_prompt()` for historical messages where inline macros shouldn't fire. `core/macros.py` is a **dependency-free leaf** (it imports nothing else in the codebase — like `database/models.py` and `core/llm_types.py`): it transforms strings and message dicts, and knows nothing about the LLM client. The transport-boundary catch-all that scrubs `{{user}}`/`{{char}}` from *every* outgoing message (the director's tool prompt embeds user-authored fragment text that can carry `{{char}}`) is `Macros.resolve_prompt_messages`. It is **bound** as the `CachedBase.resolve` hook in `_resolve_pipeline_config()` (`pipeline/config.py`) (`resolve=macros.resolve_prompt_messages`, where `macros` is a local `Macros` instance) and **applied** inside `inference/cached_call.py` — to `[*prefix, *trailing]` right before the call, so the KV tracker snapshots the exact resolved bytes sent. There is **no** macro-resolving `LLMClient` subclass/wrapper; don't reintroduce one.

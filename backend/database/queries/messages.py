@@ -428,7 +428,7 @@ async def set_workflow_message_state(message_id: int, workflow_id: str, payload:
     message's owning conversation) across the read-then-write the payload was
     computed from, or a concurrent caller can clobber the read between read
     and write. Acquisition sites: ``backend.api.routes.workflows.api_trigger_workflow`` and
-    the pre/post pipeline hook loops in ``backend.pipeline.orchestrator``. The blind
+    the pre/post pipeline hook loops in ``backend.pipeline.workflow_bridge``. The blind
     first write from ``_persist_result`` to a just-minted assistant message
     is exempt: that row is not yet the active leaf and no other caller can
     name its id, so there is nothing to serialize against.

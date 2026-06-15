@@ -38,7 +38,8 @@ Adjacent backend pieces a workflow author touches:
 |---|---|
 | `backend/core/locks.py` | `workflow_state_lock`, `workflow_character_state_lock`, `workflow_config_lock`. |
 | `backend/api/routes/workflows.py` | Workflow HTTP routes. (`_workflow_root_lock` lives in `backend/api/deps.py`.) |
-| `backend/pipeline/orchestrator.py` | Pre-pipeline hook loop (`_iterate_pre_pipeline_hooks`) + post-pipeline hook loop (inline, over `iter_subscriptions(HookType.POST_PIPELINE)`) + `_stage_workflow_attachment` + `_persist_result` + `_consume_pipeline`. |
+| `backend/pipeline/workflow_bridge.py` | The pipeline↔workflows seam: pre-pipeline hook loop (`_iterate_pre_pipeline_hooks`) + post-pipeline hook loop (`_run_post_pipeline`, over `iter_subscriptions(HookType.POST_PIPELINE)`) + `_stage_workflow_attachment`. |
+| `backend/pipeline/persistence.py` | `_persist_result` (writes the assistant row + staged attachments / message state) + `_consume_pipeline` (drains the SSE stream, persists, emits `done`). |
 | `backend/database/queries/workflow_attachments.py` | Raw row INSERT (`insert_workflow_attachment_row`) -- no budget/eviction; the cache wraps this. |
 | `backend/database/migrations/0020_workflows.py` | Schema for `workflow_attachments` + per-scope `workflow_state` columns (conversations / messages / character_cards) + `workflow_config` + `attachment_cache_budget_bytes` + `attachment_access_counter`. |
 | `backend/database/schema.py` | Mirror of post-migration shape for fresh installs. |
@@ -232,7 +233,7 @@ Distinct, int-keyed space (`dict[int, asyncio.Lock]`), keyed on the root attachm
 
 | Lock | Held by |
 |---|---|
-| `workflow_state_lock` (outer) + `workflow_character_state_lock` (inner) | PRE-pipeline iterator (`orchestrator.py`), POST-pipeline iterator (`orchestrator.py`), `/trigger` route (`main.py`). Workflow code doing read-modify-write on workflow_state acquires the same locks via the `toolkit` re-export (`backend/workflows/toolkit.py`). |
+| `workflow_state_lock` (outer) + `workflow_character_state_lock` (inner) | PRE-pipeline iterator (`workflow_bridge.py`), POST-pipeline iterator (`workflow_bridge.py`), `/trigger` route (`main.py`). Workflow code doing read-modify-write on workflow_state acquires the same locks via the `toolkit` re-export (`backend/workflows/toolkit.py`). |
 | `workflow_config_lock` | `PUT /api/workflows/{workflow_id}/config` (`main.py`). Workflow code doing read-modify-write on workflow_config acquires it via the `toolkit` re-export. |
 
 ---
@@ -297,7 +298,7 @@ The only attachment writer exposed to authors. See sec. 9.
 
 ---
 
-## 7. In-turn integration (`backend/pipeline/orchestrator.py`)
+## 7. In-turn integration (`backend/pipeline/workflow_bridge.py`)
 
 ### 7.1 Turn entry points
 
@@ -719,7 +720,7 @@ No `done` case, so `done` falls through to the default branch and reaches `S.wor
 
 ### 12.3 Reserved event names (do not author-emit as custom)
 
-These 11 names are intercepted by built-in `case`s in `handleSSEEvent` before the custom-handler default branch, so registering a handler for them has no effect: `token`, `director_start`, `director_done`, `prompt_rewritten`, `writer_rewrite`, `reasoning`, `phase_status`, `editor_done`, `user_message_created`, `workflow_attachments_rejected`, `error`. Separately, event names a workflow's pipeline hooks emit are filtered server-side: the orchestrator drops any underscore-prefixed name from `post_pipeline` (`orchestrator.py`) and `pre_pipeline` output, since the `_`-prefix is reserved for internal persistence signals (`_result`, `_refined_result`, `_editor_reasoning`). These never reach the frontend.
+These 11 names are intercepted by built-in `case`s in `handleSSEEvent` before the custom-handler default branch, so registering a handler for them has no effect: `token`, `director_start`, `director_done`, `prompt_rewritten`, `writer_rewrite`, `reasoning`, `phase_status`, `editor_done`, `user_message_created`, `workflow_attachments_rejected`, `error`. Separately, event names a workflow's pipeline hooks emit are filtered server-side: the pipeline drops any underscore-prefixed name from `post_pipeline` and `pre_pipeline` output (both hook loops in `workflow_bridge.py`), since the `_`-prefix is reserved for internal persistence signals (`_result`, `_refined_result`, `_editor_reasoning`). These never reach the frontend.
 
 ### 12.4 `afterStream`
 
@@ -1117,7 +1118,7 @@ To ship a new workflow:
 
 | Task | Read |
 |---|---|
-| Add a new hook type | `contracts.py` + `registry.py` + matching dispatch: `iter_subscriptions` in `orchestrator.py` (fan-out hooks) or `get_subscription` in `main.py` (single-dispatch hooks) |
+| Add a new hook type | `contracts.py` + `registry.py` + matching dispatch: `iter_subscriptions` in `workflow_bridge.py` (fan-out pipeline hooks) or `get_subscription` in `main.py` (single-dispatch hooks) |
 | Custom SSE event from backend to frontend | yield non-reserved name from hook -> `S.workflowEventHandlers["name"]` -- sec. 12.2, 12.3 |
 | Drive in-turn status text | yield `phase_status` with `channel: "workflow:<id>"` -- sec. 12.2, 13.1 |
 | Out-of-band status text | `setWorkflowPhase("workflow:<id>:...", label)` then `clearWorkflowPhase` in finally -- sec. 13.1 |

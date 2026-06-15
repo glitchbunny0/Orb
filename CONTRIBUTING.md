@@ -48,3 +48,9 @@ AI-generated code is welcome, but it needs extra scrutiny. If you're using an AI
 - If something can be done with an algorithm, don't use an LLM for it.
 - AI-generated code is accepted. It will be manually reviewed just like human written code. But must be subjected to more testing.
 - What about support for other languages? => The repo is optimized for English only, especially the tts and detection algorithms. You'd probably wanna fork if your use case is non-English. Can't support grammar for every language under the sun.
+
+## Vision
+
+- This is a writing/RP frontend and it will not pretend to be anything else. For general assistant tasks, use proper frontends like llama-ui or Open-WebUI.
+- There will not be support for code execution, file browsing, web uploads, etc. basically anything that opens up an RCE attack surface that may compromise the user's machine and personal data.
+- Orb's workflow is a chat frontend, we will not bloat it into a pseudo game engine with arbitrarily complex features that require learning (e.g. locations, maps, global stat tracking etc.).

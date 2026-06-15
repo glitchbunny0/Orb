@@ -34,8 +34,6 @@ AUDIT_TYPES = (
     "structural_repetition",
 )
 
-DEFAULT_AUDIT_TOGGLES = {t: True for t in AUDIT_TYPES}
-
 
 def _on(toggles: dict | None, key: str) -> bool:
     """Whether scanner *key* is enabled. Missing key / None toggles → enabled,
@@ -269,9 +267,3 @@ def format_report(report: AuditReport) -> str:
 
     sections.append("\n*** END OF REPORT ***")
     return "\n\n".join(sections)
-
-
-def _excerpt(text: str, max_len: int = 80) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."

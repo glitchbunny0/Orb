@@ -32,7 +32,7 @@ from .context import (
     _TurnSetup,
 )
 from .orchestrator import _run_pipeline
-from .passes.director import _agentic_lorebook_active
+from .passes.director import _agentic_lorebook_active, progressive
 from .passes.director.prompt_rewrite import disable_rewrite
 from .persistence import _consume_pipeline, _conversation_log_writer
 from .predicates import agent_enabled
@@ -80,8 +80,7 @@ async def _prepare_regen_context(
     history = await db.get_path_to_leaf(conversation_id, parent_id) if parent_id is not None else []
     moods_before = await db.get_moods_before_turn(conversation_id, target["turn_index"] - 1)
     ctx.director["active_moods"] = moods_before
-    grandparent = next((m for m in reversed(history) if m["role"] == "assistant"), None)
-    ctx.director["progressive_fields"] = grandparent.get("progressive_fields") or {} if grandparent else {}
+    ctx.director["progressive_fields"] = progressive.branch_baseline(history)
     user_msg_id = target["parent_id"]
     attachments = await db.get_user_attachments_for_message(user_msg_id) if user_msg_id else []
     return history, attachments
@@ -213,8 +212,7 @@ async def handle_turn(
             user_turn = messages[-1]["turn_index"]
 
         # Read progressive_fields from the grandparent node (branch-aware, unlike conversation_logs).
-        grandparent = next((m for m in reversed(messages) if m["role"] == "assistant"), None)
-        ctx.director["progressive_fields"] = grandparent.get("progressive_fields") or {} if grandparent else {}
+        ctx.director["progressive_fields"] = progressive.branch_baseline(messages)
 
         if not skip_user_persist:
             # Normalize frontend attachment format to DB format before persisting.
@@ -297,8 +295,7 @@ async def handle_fork_edit(
 
         # Reset director to branch-point baseline (branch-aware progressive_fields).
         ctx.director["active_moods"] = await db.get_moods_before_turn(conversation_id, turn_index)
-        grandparent = next((m for m in reversed(history) if m["role"] == "assistant"), None)
-        ctx.director["progressive_fields"] = grandparent.get("progressive_fields") or {} if grandparent else {}
+        ctx.director["progressive_fields"] = progressive.branch_baseline(history)
 
         # Carry original attachments onto the new sibling.
         carried_atts = await db.get_user_attachments_for_message(user_msg_id)

@@ -25,6 +25,7 @@ from ....inference import (
     parse_tool_calls,
     reasoning_cfg,
 )
+from . import progressive
 from .prompt_rewrite import (
     apply_rewrite,
     extract_rewritten_message,
@@ -88,8 +89,8 @@ class DirectorResult:
     Field names match ``TurnState`` (e.g. ``agent_raw``, ``rewritten_msg``) so
     the same name follows each value from the pass through to persistence.
 
-    ``progressive_fields`` is absent — it is derived in the orchestrator by
-    filtering ``extra_fields`` against the valid progressive fragment ids.
+    ``progressive_fields`` is absent — it is derived in ``director_stage`` by
+    filtering ``extra_fields`` through ``progressive.select``.
     """
 
     active_moods: list[str] = field(default_factory=list)
@@ -289,6 +290,12 @@ async def director_stage(
     selection or keyword scan). Returns early on a stop during the director pass
     so ``director_done`` and lorebook work are skipped.
     """
+    # Prior progressive state: the seed for this turn, filtered to the fragments
+    # currently marked progressive. Used to feed the director pass and (as prior
+    # state) the style-injection block — the symmetric counterpart of the output
+    # filter below.
+    prior_progressive = progressive.select(director.get("progressive_fields", {}), writer_fragments)
+
     # --- Director pass ---
     has_pre_writer_tools = any(cfg.enabled_tools.get(n, False) for n in PRE_WRITER_TOOLS)
     if cfg.agent_on and has_pre_writer_tools:
@@ -307,7 +314,7 @@ async def director_stage(
             reasoning_on=cfg.director_reasoning_on,
             lorebook_block=lorebook_block,
             lorebook_catalog=lorebook_catalog,
-            progressive_state=state.progressive_state,
+            progressive_state=prior_progressive,
         ):
             if event["type"] == "reasoning":
                 state.reasoning_director += event["delta"]
@@ -324,7 +331,7 @@ async def director_stage(
                 state.rewritten_msg = result.rewritten_msg
                 state.extra_fields = result.extra_fields
                 state.selected_lorebook_entries = result.selected_lorebook_entries
-                state.progressive_fields = {k: v for k, v in state.extra_fields.items() if k in state.valid_progressive_ids}
+                state.progressive_fields = progressive.select(state.extra_fields, writer_fragments)
         state.effective_msg, did_rewrite = apply_rewrite(state.user_message, state.rewritten_msg)
         if did_rewrite:
             yield {"event": "prompt_rewritten", "data": {"refined_message": state.rewritten_msg}}
@@ -347,7 +354,7 @@ async def director_stage(
             writer_fragments,
             direct_scene_enabled,
             state.extra_fields,
-            state.progressive_state,
+            prior_progressive,
         )
     )
 

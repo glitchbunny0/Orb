@@ -1,4 +1,5 @@
 from ....inference import build_lorebook_catalog
+from . import progressive
 from .director import (
     DirectorResult,
     _agentic_lorebook_active,
@@ -16,4 +17,5 @@ __all__ = [
     "_agentic_lorebook_active",
     "build_direct_scene_override",
     "build_lorebook_catalog",
+    "progressive",
 ]

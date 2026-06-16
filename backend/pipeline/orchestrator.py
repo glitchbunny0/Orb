@@ -106,13 +106,10 @@ async def _run_pipeline(
     writer_fragments, feedback_fragments = _split_interactive_fragments(interactive_fragments)
 
     # Mutable state threaded through the three passes; seeded from director + user message.
-    _valid_progressive_ids = {df["id"] for df in writer_fragments if df.get("field_type") == "progressive"}
     state = TurnState(
         user_message=user_message,
         effective_msg=user_message,
         active_moods=director["active_moods"],
-        progressive_state={k: v for k, v in director.get("progressive_fields", {}).items() if k in _valid_progressive_ids},
-        valid_progressive_ids=_valid_progressive_ids,
     )
 
     # --- Director pass (+ rewrite, style injection, agentic-lorebook block) ---

@@ -63,7 +63,7 @@ class _PipelineConfig:
 
 # Fields the terminal ``_result`` event carries — a fixed subset of ``TurnState``
 # so the wire shape stays stable and working fields (``writer_content``,
-# ``progressive_state``, etc.) stay off the wire. Every name here is a
+# ``writer_lorebook_block``, etc.) stay off the wire. Every name here is a
 # ``TurnState`` field with a default, so the dict rehydrates cleanly via
 # ``TurnState(**event["data"])``.
 _RESULT_FIELDS = (
@@ -96,19 +96,17 @@ class TurnState:
     Every field has a default so a partially-completed turn (aborted or under
     test) still produces a valid instance.
 
-    ``progressive_state`` and ``valid_progressive_ids`` are inputs, not outputs:
-    they hold the director's seed values and the id set used to filter its output
-    into ``progressive_fields``. ``staged_attachments`` / ``staged_message_state``
-    are set by the orchestrator from post-pipeline workflow hooks just before
-    ``_result`` is emitted.
+    Progressive seed/output handling lives in the director pass (see
+    ``passes/director/progressive.py``); ``progressive_fields`` here is the
+    persisted output, parallel to ``active_moods``. ``staged_attachments`` /
+    ``staged_message_state`` are set by the orchestrator from post-pipeline
+    workflow hooks just before ``_result`` is emitted.
     """
 
     # --- seeds / inputs ---
     user_message: str = ""
     effective_msg: str = ""
     active_moods: list[str] = field(default_factory=list)
-    progressive_state: dict = field(default_factory=dict)
-    valid_progressive_ids: set[str] = field(default_factory=set)
 
     # --- director outputs ---
     agent_raw: str = ""

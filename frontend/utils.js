@@ -237,6 +237,12 @@ export function formatProseWithDiff(ops) {
   return html.replace(/\n/g, "<br>");
 }
 
+// Icons for the code-block toolbar (word-wrap toggle + copy). Inline SVG so the
+// markup stays a self-contained string; matches the stroke style of the message
+// toolbar icons in chat_core.js.
+const ICON_WRAP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="3" y1="6" x2="21" y2="6"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="16 16 14 18 16 20"/><line x1="3" y1="18" x2="10" y2="18"/></svg>`;
+const ICON_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+
 // Markdown image link to an image-extension URL, e.g. ![alt](https://host/x.jpg)
 const IMG_LINK_RE = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+\.(?:jpe?g|png|gif|webp))\)/i;
 
@@ -290,12 +296,27 @@ function _formatProse(text) {
       if (imgMatch) {
         return renderImageEmbed(imgMatch[2], imgMatch[1]);
       }
-      const codeMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+      const codeMatch = part.match(/^```(\w*)(\n)?([\s\S]*?)```$/);
       if (codeMatch) {
-        const lang = codeMatch[1];
-        const code = esc(codeMatch[2]);
+        // An info string is only a language when a newline follows the opening
+        // fence. A single-line fence (no newline) has no language — its first
+        // token is content, so ```This is a test``` must keep "This" as code
+        // rather than swallowing it as a language identifier.
+        const hasNewline = !!codeMatch[2];
+        const lang = hasNewline ? codeMatch[1] : "";
+        const code = esc(hasNewline ? codeMatch[3] : codeMatch[1] + codeMatch[3]);
         const langAttr = lang ? ` class="language-${esc(lang)}"` : "";
-        return `<pre><code${langAttr}>${code}</code></pre>`;
+        return (
+          `<div class="code-block">` +
+          `<div class="code-block-bar">` +
+          `<button type="button" class="code-block-btn" title="Toggle word wrap" aria-label="Toggle word wrap" aria-pressed="false" ` +
+          `onclick="this.setAttribute('aria-pressed', this.closest('.code-block').classList.toggle('wrap'))">${ICON_WRAP}</button>` +
+          `<button type="button" class="code-block-btn" title="Copy" aria-label="Copy code" ` +
+          `onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent).then(() => { this.classList.add('copied'); setTimeout(() => this.classList.remove('copied'), 1200); })">${ICON_COPY}</button>` +
+          `</div>` +
+          `<pre><code${langAttr}>${code}</code></pre>` +
+          `</div>`
+        );
       }
       // Strip boundary newlines that would double-up spacing next to <pre> blocks
       let prose = part;

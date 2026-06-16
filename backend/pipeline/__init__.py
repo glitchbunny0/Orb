@@ -5,7 +5,7 @@ Sits above ``workflows`` in the one-way order
 The turn lifecycle is split into single-purpose modules:
 
 * ``predicates`` — dependency-free turn predicates (the package's ``core`` leaf)
-* ``state`` — per-turn contract dataclasses (incl. ``_PipelineResult``)
+* ``state`` — per-turn contract dataclasses (``TurnState`` carries the result too)
 * ``config`` — per-turn config / tool-blob resolution
 * ``context`` — inbound load, prefixes, and pre-pipeline setup
 * ``workflow_bridge`` — the pre/post secondary-workflow hook loops

@@ -92,7 +92,7 @@ class DirectorResult:
     """Typed payload of the director pass's terminal ``done`` event.
 
     Field names match the orchestrator's turn-state locals and
-    :class:`~backend.pipeline.state._PipelineResult` (notably ``agent_raw``,
+    :class:`~backend.pipeline.state.TurnState` (notably ``agent_raw``,
     ``rewritten_msg``) so a single name follows each value end to end. This
     replaces the former 6-positional ``result`` tuple: adding or reordering a
     field can no longer silently transpose values at the unpack site.

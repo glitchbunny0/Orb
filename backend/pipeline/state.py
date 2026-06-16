@@ -11,17 +11,16 @@ coordinator.
 Only the dataclass *shapes* live here. Their construction and behaviour
 (``_resolve_pipeline_config`` in ``config.py``, ``_make_result`` in
 ``orchestrator.py``, ``is_dual_model`` in ``predicates.py``, …) stay with their
-callers. ``_PipelineResult`` is the one exception that moved *in*: it is the
-terminal result contract produced by ``orchestrator._make_result`` and consumed
-by ``persistence._consume_pipeline``. Once production and consumption split
-across two modules it stopped being "pipeline-internal to one file" and became a
-shared contract — so it joins the other per-turn shapes here, the neutral home
-both importers point down into.
+callers. ``TurnState`` carries a turn end-to-end: the passes mutate it, the
+orchestrator projects its result-subset into the terminal ``_result`` event via
+``as_result_event_data``, and ``persistence._consume_pipeline`` rehydrates a
+``TurnState`` from that dict to drive the saves — so one object (not a separate
+result contract) follows each value from the director pass through to persistence.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..core import ContentPart
@@ -71,22 +70,55 @@ class _PipelineConfig:
     agent_lane: ModelLane
 
 
+# Result-subset of ``TurnState`` — the fields the terminal ``_result`` event
+# carries and that ``persistence`` reads back. Listed explicitly (rather than
+# all of ``TurnState``) so the wire dict stays the same JSON shape it was when a
+# separate result dataclass existed, and so non-result working fields
+# (``writer_content``, ``progressive_state``, ``valid_progressive_ids``, …) stay
+# off the wire. Every name here is a ``TurnState`` field with a default, so the
+# dict rehydrates cleanly via ``TurnState(**event["data"])``.
+_RESULT_FIELDS = (
+    "active_moods",
+    "agent_raw",
+    "calls",
+    "latency",
+    "rewritten_msg",
+    "effective_msg",
+    "resp_text",
+    "inj_block",
+    "extra_fields",
+    "progressive_fields",
+    "reasoning_director",
+    "reasoning_writer",
+    "reasoning_editor",
+    "feedback_values",
+    "staged_attachments",
+    "staged_message_state",
+)
+
+
 @dataclass
 class TurnState:
     """Mutable per-turn state threaded by reference through the three pass
-    stages (``director_stage`` / ``writer_stage`` / ``editor_stage``).
+    stages (``director_stage`` / ``writer_stage`` / ``editor_stage``), then
+    carried out through persistence.
 
-    These were ``_run_pipeline``'s ~20 turn-state locals. The result-bound
-    fields mirror ``_PipelineResult`` (and ``DirectorResult``) names so
-    one name follows each value from the director pass through to persistence;
-    ``_make_result`` reads this straight into a ``_PipelineResult``.
+    These were ``_run_pipeline``'s ~20 turn-state locals. One object follows each
+    value from the director pass through to the save: the passes mutate it, the
+    orchestrator projects its result-subset (``_RESULT_FIELDS``) into the
+    terminal ``_result`` event via :meth:`as_result_event_data`, and
+    ``persistence._consume_pipeline`` rehydrates a fresh ``TurnState`` from that
+    dict. Every field defaults, so a turn aborted before ``_result`` fires (or a
+    test injecting a partial payload) still produces a usable instance.
 
     Seeded in ``_run_pipeline`` from ``director`` (``active_moods`` and the
     progressive seed filtered to valid fragment ids) and the resolved
     ``user_message`` (``effective_msg``). ``progressive_state`` /
     ``valid_progressive_ids`` are turn inputs (not result fields): the director
     seed map and the id set used to filter director output into
-    ``progressive_fields``.
+    ``progressive_fields``. ``staged_attachments`` / ``staged_message_state`` are
+    set by the orchestrator from the post-pipeline workflow hooks just before
+    ``_result`` is emitted.
     """
 
     # --- seeds / inputs ---
@@ -115,43 +147,12 @@ class TurnState:
     reasoning_editor: str = ""
     feedback_values: dict = field(default_factory=dict)
 
-
-@dataclass
-class _PipelineResult:
-    """Terminal payload of the pipeline's internal ``_result`` event: the final
-    draft plus everything the persistence path needs.
-
-    It crosses the SSE hop as a plain dict (``as_event_data()``) so the
-    ``_result`` event stays JSON-shaped for tests and inspectors, then is rebuilt
-    into this typed form by ``persistence._consume_pipeline`` before the persist
-    helpers read it. Every field defaults, so a turn aborted before ``_result``
-    ever fires (or a test injecting a partial payload) still produces a usable
-    instance via the bare ``_PipelineResult()`` seed in ``_consume_pipeline``.
-
-    Built from a :class:`TurnState` by ``orchestrator._make_result``; the
-    result-bound ``TurnState`` field names mirror these so one name follows each
-    value from the director pass through to persistence.
-    """
-
-    active_moods: list[str] = field(default_factory=list)
-    agent_raw: str = ""
-    calls: list[dict] = field(default_factory=list)
-    latency: int = 0
-    rewritten_msg: str | None = None
-    effective_msg: str = ""
-    resp_text: str = ""
-    inj_block: str = ""
-    extra_fields: dict = field(default_factory=dict)
-    progressive_fields: dict = field(default_factory=dict)
-    reasoning_director: str = ""
-    reasoning_writer: str = ""
-    reasoning_editor: str = ""
-    feedback: dict = field(default_factory=dict)
+    # --- post-pipeline workflow staging (set by the orchestrator) ---
     staged_attachments: list[dict] = field(default_factory=list)
     staged_message_state: dict = field(default_factory=dict)
 
-    def as_event_data(self) -> dict:
-        """Shallow field dict for the ``_result`` SSE envelope. Shallow on
-        purpose: ``staged_attachments`` carries raw artifact bytes that must not
-        be deep-copied."""
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+    def as_result_event_data(self) -> dict:
+        """Shallow result-subset dict for the ``_result`` SSE envelope. Shallow
+        on purpose: ``staged_attachments`` carries raw artifact bytes that must
+        not be deep-copied."""
+        return {name: getattr(self, name) for name in _RESULT_FIELDS}

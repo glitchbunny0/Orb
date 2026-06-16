@@ -26,7 +26,7 @@ from .config import _resolve_pipeline_config, _split_interactive_fragments
 from .passes.director import director_stage
 from .passes.editor import editor_stage
 from .passes.writer import writer_stage
-from .state import TurnState, _PipelineResult
+from .state import TurnState
 from .workflow_bridge import _PostPipelineResult, _run_post_pipeline
 
 logger = logging.getLogger(__name__)
@@ -39,28 +39,11 @@ def _make_result(state: TurnState, staged: list[dict] | None = None, staged_stat
     """Project the mutable :class:`TurnState` into the pipeline's terminal
     ``_result`` SSE event. *staged* / *staged_state* carry the post-pipeline
     workflow attachments and per-message state (empty on the writer-abort path,
-    which fires before that iteration)."""
-    return {
-        "event": "_result",
-        "data": _PipelineResult(
-            active_moods=state.active_moods,
-            agent_raw=state.agent_raw,
-            calls=state.calls,
-            latency=state.latency,
-            rewritten_msg=state.rewritten_msg,
-            effective_msg=state.effective_msg,
-            resp_text=state.resp_text,
-            inj_block=state.inj_block,
-            extra_fields=state.extra_fields,
-            progressive_fields=state.progressive_fields,
-            reasoning_director=state.reasoning_director,
-            reasoning_writer=state.reasoning_writer,
-            reasoning_editor=state.reasoning_editor,
-            feedback=state.feedback_values,
-            staged_attachments=staged or [],
-            staged_message_state=staged_state or {},
-        ).as_event_data(),
-    }
+    which fires before that iteration); they are folded onto *state* so the whole
+    result rides one object."""
+    state.staged_attachments = staged or []
+    state.staged_message_state = staged_state or {}
+    return {"event": "_result", "data": state.as_result_event_data()}
 
 
 async def _run_pipeline(

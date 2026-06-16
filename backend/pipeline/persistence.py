@@ -10,8 +10,9 @@ counter, the ``conversation_logs`` row). The ``_persist_*`` / ``_fallback_*`` /
 a turn is aborted before ``_result`` fires, with ``asyncio.shield`` guarding the
 finally-block writes against request-task cancellation.
 
-Reads ``agent_enabled`` from ``predicates`` (no pass-module coupling) and the
-``_PipelineResult`` contract from ``state``.
+Reads ``agent_enabled`` from ``predicates`` (no pass-module coupling) and
+rehydrates the terminal ``_result`` event into a ``TurnState`` (the same object
+the passes built) from ``state``.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from typing import Any, AsyncIterator, Mapping
 from .. import database as db
 from ..workflows.attachment_cache import OVERSIZE_NO_METADATA_REASON
 from .predicates import agent_enabled
-from .state import _PipelineResult
+from .state import TurnState
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def _conversation_log_writer(conversation_id: str, log_turn_index: int):
     the assistant turn index so branches stay distinguishable in the log.
     """
 
-    async def _on_result(res: _PipelineResult, asst_id):
+    async def _on_result(res: TurnState, asst_id):
         await db.add_conversation_log(
             conversation_id,
             log_turn_index,
@@ -51,13 +52,13 @@ def _conversation_log_writer(conversation_id: str, log_turn_index: int):
             reasoning_director=res.reasoning_director,
             reasoning_writer=res.reasoning_writer,
             reasoning_editor=res.reasoning_editor,
-            feedback=res.feedback,
+            feedback=res.feedback_values,
         )
 
     return _on_result
 
 
-async def _persist_rewrite(res: _PipelineResult, user_msg_id: int | None) -> None:
+async def _persist_rewrite(res: TurnState, user_msg_id: int | None) -> None:
     """Overwrite the stored user message with the director's rewrite, if any.
 
     No-op when the director did not rewrite the message. Shared by both the
@@ -69,7 +70,7 @@ async def _persist_rewrite(res: _PipelineResult, user_msg_id: int | None) -> Non
 
 async def _persist_result(
     conversation_id: str,
-    res: _PipelineResult,
+    res: TurnState,
     settings: Mapping[str, Any],
     user_msg_id: int | None,
     turn_index: int,
@@ -139,7 +140,7 @@ async def _persist_result(
 
 async def _fallback_persist(
     conversation_id: str,
-    res: _PipelineResult,
+    res: TurnState,
     settings: Mapping[str, Any],
     user_msg_id: int | None,
     turn_index: int,
@@ -182,7 +183,7 @@ async def _fallback_persist(
 
 async def _shielded_fallback(
     conversation_id: str,
-    res: _PipelineResult,
+    res: TurnState,
     settings: Mapping[str, Any],
     user_msg_id: int | None,
     turn_index: int,
@@ -218,7 +219,7 @@ async def _shielded_fallback(
             logger.exception("Fallback persistence retry failed")
 
 
-async def _shielded_log_save(extra_on_result, res: _PipelineResult, asst_id: int | None):
+async def _shielded_log_save(extra_on_result, res: TurnState, asst_id: int | None):
     """Run the ``extra_on_result`` callback exactly once under ``asyncio.shield``.
 
     The callback writes a ``conversation_logs`` row, which is a bare INSERT
@@ -262,7 +263,7 @@ async def _consume_pipeline(
 
     Called by ``entrypoints._generate_reply``.
     """
-    res = _PipelineResult()
+    res = TurnState()
     asst_id = None
     persisted = False
     accumulated_text = ""
@@ -274,7 +275,7 @@ async def _consume_pipeline(
                 accumulated_text += event["data"]
                 yield event
             elif etype == "_result":
-                res = _PipelineResult(**event["data"])
+                res = TurnState(**event["data"])
                 asst_id, rejected = await _persist_result(conversation_id, res, settings, user_msg_id, turn_index)
                 persisted = True
                 if rejected and asst_id is not None:

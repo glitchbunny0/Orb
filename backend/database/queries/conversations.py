@@ -166,18 +166,16 @@ async def set_workflow_state(conv_id: str, workflow_id: str, payload: dict | Non
     payload=None removes the slot. Empty dict stores {}. No-op if conversation
     missing (UPDATE matches zero rows).
 
-    Caller must hold ``backend.locks.workflow_state_lock(conv_id, workflow_id)``
+    Caller must hold ``backend.core.locks.workflow_state_lock(conv_id, workflow_id)``
     across the read-then-write the payload was computed from. Acquisition
-    sites: ``backend.main.api_trigger_workflow`` and the pre/post pipeline
-    hook loops in ``backend.orchestrator``. Direct use outside those paths
+    sites: ``backend.api.routes.workflows.api_trigger_workflow`` and the pre/post pipeline
+    hook loops in ``backend.pipeline.workflow_bridge``. Direct use outside those paths
     re-introduces the read-modify-write clobber.
     """
     async with get_db() as db:
         if payload is None:
             await db.execute(
-                "UPDATE conversations "
-                "SET workflow_state = json_remove(COALESCE(workflow_state, '{}'), '$.' || ?) "
-                "WHERE id = ?",
+                "UPDATE conversations SET workflow_state = json_remove(COALESCE(workflow_state, '{}'), '$.' || ?) WHERE id = ?",
                 (workflow_id, conv_id),
             )
         else:

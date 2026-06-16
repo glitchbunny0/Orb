@@ -31,6 +31,11 @@ validates that every ``produces_artifacts=True`` workflow has both
 from __future__ import annotations
 
 from .contracts import (
+    EV_ATTACH_ARTIFACT,
+    EV_DRAFT_REPLACED,
+    EV_ENABLE_TOOLS,
+    EV_SET_MESSAGE_STATE,
+    EV_SYSTEM_PROMPT,
     HookType,
     OnDemandCtx,
     PostCtx,
@@ -66,13 +71,23 @@ from .registry import (
 from .tts import tts_workflow
 from .tts.hooks import (
     on_demand as _tts_on_demand,
+)
+from .tts.hooks import (
     post_pipeline as _tts_post_pipeline,
+)
+from .tts.hooks import (
     regenerate as _tts_regenerate,
+)
+from .tts.hooks import (
     reroll_gen as _tts_reroll_gen,
 )
 
-
 __all__ = [
+    "EV_ATTACH_ARTIFACT",
+    "EV_DRAFT_REPLACED",
+    "EV_ENABLE_TOOLS",
+    "EV_SET_MESSAGE_STATE",
+    "EV_SYSTEM_PROMPT",
     "HookType",
     "OnDemandCtx",
     "PostCtx",

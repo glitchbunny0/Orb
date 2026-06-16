@@ -16,11 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.kv_tracker import _KVCacheTracker
-from backend.llm_client import LLMClient
-from backend.orchestrator import _run_pipeline
-from backend.passes.director import DirectorResult
-
+from backend.inference import LLMClient, _KVCacheTracker
+from backend.pipeline.orchestrator import _run_pipeline
+from backend.pipeline.passes.director import DirectorResult
 
 _DIRECTOR_STATE = {"active_moods": []}
 _PREFIX = [{"role": "system", "content": "You are an assistant."}]
@@ -48,7 +46,6 @@ async def _drain(gen) -> list[dict]:
 
 
 class TestAbortPropagation:
-
     async def test_abort_after_director_skips_writer_pass(self):
         """Writer pass must not be called when abort is signalled during the director pass."""
         client = _make_client()
@@ -69,8 +66,9 @@ class TestAbortPropagation:
             "reasoning_enabled_passes": {},
         }
 
-        with patch("backend.orchestrator.director_pass", new=mock_director), patch(
-            "backend.orchestrator.writer_pass", new=mock_writer
+        with (
+            patch("backend.pipeline.passes.director.director.director_pass", new=mock_director),
+            patch("backend.pipeline.passes.writer.writer_pass", new=mock_writer),
         ):
             await _drain(
                 _run_pipeline(
@@ -108,8 +106,9 @@ class TestAbortPropagation:
             "reasoning_enabled_passes": {},
         }
 
-        with patch("backend.orchestrator.writer_pass", new=mock_writer), patch(
-            "backend.orchestrator.editor_pass", new=mock_editor
+        with (
+            patch("backend.pipeline.passes.writer.writer_pass", new=mock_writer),
+            patch("backend.pipeline.passes.editor.editor.editor_pass", new=mock_editor),
         ):
             await _drain(
                 _run_pipeline(
@@ -151,8 +150,9 @@ class TestErrorAborts:
             "reasoning_enabled_passes": {},
         }
 
-        with patch("backend.orchestrator.director_pass", new=mock_director), patch(
-            "backend.orchestrator.writer_pass", new=mock_writer
+        with (
+            patch("backend.pipeline.passes.director.director.director_pass", new=mock_director),
+            patch("backend.pipeline.passes.writer.writer_pass", new=mock_writer),
         ):
             with pytest.raises(RuntimeError, match="director endpoint exploded"):
                 await _drain(
@@ -190,8 +190,9 @@ class TestErrorAborts:
             "reasoning_enabled_passes": {},
         }
 
-        with patch("backend.orchestrator.writer_pass", new=mock_writer), patch(
-            "backend.orchestrator.editor_pass", new=mock_editor
+        with (
+            patch("backend.pipeline.passes.writer.writer_pass", new=mock_writer),
+            patch("backend.pipeline.passes.editor.editor.editor_pass", new=mock_editor),
         ):
             with pytest.raises(RuntimeError, match="editor endpoint exploded"):
                 await _drain(

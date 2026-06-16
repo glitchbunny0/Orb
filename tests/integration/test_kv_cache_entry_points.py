@@ -40,7 +40,7 @@ from dataclasses import dataclass
 import pytest
 
 from backend.database import get_messages
-from backend.kv_tracker import _serialize_messages
+from backend.inference.kv_tracker import _serialize_messages
 
 # A draft well over the length-guard ceiling so the editor pass always fires on
 # the pipeline-backed entry points (regenerate / super_regenerate / fork_edit).
@@ -49,7 +49,7 @@ _LONG_DRAFT = "word " * 60
 
 def _wire_tools(tools) -> str:
     """Serialize tools the way httpx puts them on the wire: insertion order
-    preserved, no sort_keys. Mirrors backend.llm_client's ``json=body``."""
+    preserved, no sort_keys. Mirrors backend.inference.client's ``json=body``."""
     return json.dumps(tools, separators=(",", ":"), ensure_ascii=False) if tools else ""
 
 
@@ -241,9 +241,9 @@ async def test_entry_point_tools_blob_and_prefix_match_the_turn(client, llm_mock
             "cached system prefix — build_prefix rendered the system body differently."
         )
         sent = _serialize_messages(c["messages"])
-        assert (
-            "{{char}}" not in sent and "{{user}}" not in sent
-        ), f"MACRO LEAK: entry point {name!r} shipped an unresolved placeholder to the model."
+        assert "{{char}}" not in sent and "{{user}}" not in sent, (
+            f"MACRO LEAK: entry point {name!r} shipped an unresolved placeholder to the model."
+        )
 
 
 async def test_magic_rewrite_ships_the_turns_full_tools_blob(client, llm_mock):

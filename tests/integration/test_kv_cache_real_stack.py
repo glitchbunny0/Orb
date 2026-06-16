@@ -29,21 +29,20 @@ from __future__ import annotations
 import json
 
 from backend.database import get_messages
-from backend.kv_tracker import _serialize_messages
-
+from backend.inference.kv_tracker import _serialize_messages
 
 # ── A draft well over the length-guard ceiling so the editor pass always fires.
 _LONG_DRAFT = "word " * 60
 
 # Smallest valid PNG (1×1, transparent). The /send attachment validator
 # base64-decodes this, so it must be real base64 of a real image.
-_PNG_1X1_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk" "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+_PNG_1X1_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 
 def _wire_tools(tools) -> str:
     """Serialize tools the way httpx puts them on the wire: insertion order
     preserved, no sort_keys (the tracker's sorted view would hide key-order
-    drift). Mirrors backend.llm_client's ``client.stream(..., json=body)``."""
+    drift). Mirrors backend.inference.client's ``client.stream(..., json=body)``."""
     return json.dumps(tools, separators=(",", ":"), ensure_ascii=False) if tools else ""
 
 
@@ -136,9 +135,9 @@ async def test_within_turn_all_passes_share_prefix_and_tools_through_build_prefi
     # placeholder surviving here means the hook was dropped.
     for c in calls:
         sent = _serialize_messages(c["messages"])
-        assert (
-            "{{char}}" not in sent and "{{user}}" not in sent
-        ), f"MACRO LEAK: pass {c['pass']!r} shipped an unresolved placeholder to the model."
+        assert "{{char}}" not in sent and "{{user}}" not in sent, (
+            f"MACRO LEAK: pass {c['pass']!r} shipped an unresolved placeholder to the model."
+        )
         assert "Aria" in prefix_bytes  # {{char}} → the card name, resolved in the shared prefix
 
     # Inv-3 — wire-faithful tools blob identical across every pass, non-empty.
@@ -147,9 +146,9 @@ async def test_within_turn_all_passes_share_prefix_and_tools_through_build_prefi
     assert next(iter(blobs)), "expected a non-empty tools blob in single-model mode"
 
     # §3 — editor's prompt is a strict extension of the writer's full prompt.
-    assert _serialize_messages(editor["messages"][: len(writer["messages"])]) == _serialize_messages(
-        writer["messages"]
-    ), "CACHE BUST: editor no longer extends the writer's prompt verbatim."
+    assert _serialize_messages(editor["messages"][: len(writer["messages"])]) == _serialize_messages(writer["messages"]), (
+        "CACHE BUST: editor no longer extends the writer's prompt verbatim."
+    )
 
 
 async def test_cross_turn_prefix_is_append_only_through_persistence(client, llm_mock):
@@ -240,7 +239,7 @@ async def test_attachment_in_shared_history_is_byte_stable_across_passes_and_tur
     for c in turn2:
         head = _serialize_messages(c["messages"][: len(prefix2)])
         assert head == prefix2_bytes, (
-            f"CACHE BUST: pass {c['pass']!r} encoded the in-history image differently " "from the other passes."
+            f"CACHE BUST: pass {c['pass']!r} encoded the in-history image differently from the other passes."
         )
 
     # The image must actually be in the cached prefix as a data URL, proving the

@@ -143,7 +143,7 @@ async def set_workflow_config(workflow_id: str, payload: dict) -> None:
 
     Empty dict clears the slot (json_remove); non-empty stores it (json_set).
 
-    Caller must hold ``backend.locks.workflow_config_lock()`` across the
+    Caller must hold ``backend.core.locks.workflow_config_lock()`` across the
     read-then-write the payload was computed from. Direct use without the
     lock is safe for blind-replace writes -- a single ``json_set`` is
     atomic at the SQL layer -- but RMW sequences (``get_workflow_config``
@@ -154,9 +154,7 @@ async def set_workflow_config(workflow_id: str, payload: dict) -> None:
     async with get_db() as db:
         if not payload:
             await db.execute(
-                "UPDATE settings "
-                "SET workflow_config = json_remove(COALESCE(workflow_config, '{}'), '$.' || ?) "
-                "WHERE id = 1",
+                "UPDATE settings SET workflow_config = json_remove(COALESCE(workflow_config, '{}'), '$.' || ?) WHERE id = 1",
                 (workflow_id,),
             )
         else:

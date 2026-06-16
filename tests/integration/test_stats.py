@@ -27,8 +27,9 @@ async def _seed_character(name: str, message_count: int, *, old: bool = False) -
     Pass ``old=True`` to backdate all messages by 48 hours so they satisfy the
     "missed" spotlight query's 24-hour recency cutoff.
     """
-    import aiosqlite
     from datetime import datetime, timedelta, timezone
+
+    import aiosqlite
 
     cid = str(uuid.uuid4())
     await dbmod.create_conversation(cid, f"{name} chat", name, "")
@@ -141,7 +142,7 @@ async def test_missed_theme_excludes_favorite(client, db, monkeypatch):
     await _seed_character("Alice", 300)
     await _seed_character("Bob", 150, old=True)
 
-    monkeypatch.setattr("backend.main.random.choice", lambda options: options[-1])
+    monkeypatch.setattr("backend.api.routes.stats.random.choice", lambda options: options[-1])
 
     resp = await client.get("/api/stats")
     assert resp.status_code == 200

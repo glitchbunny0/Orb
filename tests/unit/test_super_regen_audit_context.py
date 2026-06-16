@@ -14,15 +14,13 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.kv_tracker import CachedBase
-from backend.passes.editor.audit import AuditReport
-from backend.passes.editor.editor import editor_pass
-from backend.passes.editor.opening_monotony import MonotonyResult
-from backend.passes.editor.slop_detector import DetectionResult
-from backend.passes.editor.structural_repetition import StructuralResult
-from backend.passes.editor.template_repetition import TemplateResult
-from backend.llm_client import LLMClient
-from backend.tool_defs import enabled_schemas
+from backend.analysis import AuditReport
+from backend.analysis.detectors.opening_monotony import MonotonyResult
+from backend.analysis.detectors.slop_detector import DetectionResult
+from backend.analysis.detectors.structural_repetition import StructuralResult
+from backend.analysis.detectors.template_repetition import TemplateResult
+from backend.inference import CachedBase, LLMClient, enabled_schemas
+from backend.pipeline.passes.editor.editor import editor_pass
 
 
 def _editor_base(prefix: list[dict]) -> CachedBase:
@@ -78,7 +76,7 @@ async def test_audit_context_msgs_overrides_prefix():
         return _clean_report(), ""
 
     with patch(
-        "backend.passes.editor.editor._run_contextual_audit",
+        "backend.pipeline.passes.editor.editor._run_contextual_audit",
         new=fake_contextual_audit,
     ):
         events = []
@@ -97,7 +95,7 @@ async def test_audit_context_msgs_overrides_prefix():
 
     assert len(captured_prev_msgs) == 1, "audit should run exactly once (clean result)"
     assert captured_prev_msgs[0] == [], (
-        "audit_context_msgs=[] must be forwarded directly; " f"got {captured_prev_msgs[0]!r} instead (prefix-derived)"
+        f"audit_context_msgs=[] must be forwarded directly; got {captured_prev_msgs[0]!r} instead (prefix-derived)"
     )
 
 
@@ -121,7 +119,7 @@ async def test_no_audit_context_msgs_falls_back_to_prefix():
         return _clean_report(), ""
 
     with patch(
-        "backend.passes.editor.editor._run_contextual_audit",
+        "backend.pipeline.passes.editor.editor._run_contextual_audit",
         new=fake_contextual_audit,
     ):
         async for _ in editor_pass(
@@ -174,7 +172,7 @@ async def test_super_regen_prior_history_still_scanned():
         return _clean_report(), ""
 
     with patch(
-        "backend.passes.editor.editor._run_contextual_audit",
+        "backend.pipeline.passes.editor.editor._run_contextual_audit",
         new=fake_contextual_audit,
     ):
         async for _ in editor_pass(
@@ -220,7 +218,7 @@ async def test_super_regen_does_not_flag_replaced_message():
         return _clean_report(), ""
 
     with patch(
-        "backend.passes.editor.editor._run_contextual_audit",
+        "backend.pipeline.passes.editor.editor._run_contextual_audit",
         new=fake_contextual_audit,
     ):
         events = []
@@ -241,5 +239,5 @@ async def test_super_regen_does_not_flag_replaced_message():
     assert len(done_events) == 1
     # Clean audit → no LLM call needed → draft is returned as None (unchanged)
     assert done_events[0]["draft"] is None, (
-        "Editor should not attempt to rewrite when audit_context_msgs excludes " "the replaced message and the audit is clean"
+        "Editor should not attempt to rewrite when audit_context_msgs excludes the replaced message and the audit is clean"
     )

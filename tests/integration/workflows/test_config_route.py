@@ -13,15 +13,13 @@ from __future__ import annotations
 
 import asyncio
 
-from backend.locks import workflow_config_lock
+from backend.core.locks import workflow_config_lock
 from backend.workflows import (
     Workflow,
     get_workflow_config,
     register_workflow,
     set_workflow_config,
 )
-
-from ._fixtures import _restore_registry  # noqa: F401 -- autouse fixture activated by import
 
 
 async def test_put_persists_and_echoes_effective_config(client):

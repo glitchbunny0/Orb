@@ -9,7 +9,7 @@ with require_last_message=True, so only phrases present in the draft surface.
 
 from __future__ import annotations
 
-from backend.passes.editor.editor import _run_contextual_audit
+from backend.pipeline.passes.editor.editor import _run_contextual_audit
 
 # The default threshold is 3 messages, so a flag needs the draft plus two
 # previous messages all carrying the same distinctive phrase.
@@ -41,9 +41,9 @@ def test_phrase_repetition_no_false_positive_when_draft_is_distinct():
         previous_assistant_msgs=[_PREV1, _PREV2],
     )
     assert report.phrase_result is not None
-    assert (
-        not report.phrase_result.flagged_phrases
-    ), f"Expected no flagged phrases, got {[p.phrase for p in report.phrase_result.flagged_phrases]}"
+    assert not report.phrase_result.flagged_phrases, (
+        f"Expected no flagged phrases, got {[p.phrase for p in report.phrase_result.flagged_phrases]}"
+    )
 
 
 def test_phrase_repetition_below_threshold_not_flagged():

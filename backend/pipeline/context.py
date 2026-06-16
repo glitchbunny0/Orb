@@ -1,20 +1,17 @@
 """
-context.py — Inbound turn assembly: load → prefixes → pre-pipeline setup.
+context.py — Everything that happens before the passes run.
 
-Two phases, kept in one module because both are "everything before the passes
-run":
+Two phases:
 
-* **Load** — :func:`_load_pipeline_context` fetches every per-conversation input
+* **Load** — :func:`_load_pipeline_context` fetches all per-conversation data
   (settings, conversation, card, director state, fragments, phrase bank,
-  lorebook, the writer/agent LLM clients) into the frozen
-  :class:`PipelineContext`, and :func:`_build_prefixes` builds the writer +
-  optional agent message prefixes from it.
-* **Prepare** — :func:`_prepare_turn` runs the pre-pipeline workflow hooks (which
-  may stream SSE events and extend the tool map / system prompt), computes the
-  lorebook block (or the agentic catalog), builds the byte-identical tool blob,
-  and yields a single :class:`_TurnSetup`.
+  lorebook, LLM clients) into the frozen :class:`PipelineContext`, and
+  :func:`_build_prefixes` builds the writer and optional agent message prefixes.
+* **Prepare** — :func:`_prepare_turn` runs pre-pipeline workflow hooks (which may
+  extend the tool map or system prompt), computes the lorebook block or agentic
+  catalog, builds the tool blob, and yields a single :class:`_TurnSetup`.
 
-``LLMClient`` is constructed here (and *only* here) — tests patch
+``LLMClient`` is constructed here and only here — tests patch
 ``backend.pipeline.context.LLMClient`` to substitute the streaming client.
 """
 
@@ -52,19 +49,14 @@ from .workflow_bridge import _iterate_pre_pipeline_hooks
 
 @dataclass(frozen=True)
 class PipelineContext:
-    """Resolved per-conversation inputs the pipeline needs, loaded once by
-    :func:`_load_pipeline_context` and threaded through every entry point.
+    """Per-conversation data loaded once and threaded through every entry point.
 
-    Frozen so the *binding* of each field is immutable; the optional fields make
-    explicit what was previously only implied by the ``ctx[...]`` vs
-    ``ctx.get(...)`` split in readers. ``card`` / ``active_persona`` are None when
-    the conversation has no character card / no active user persona; ``agent_client``
-    and ``agent_system_prompt`` are None unless a separate agent endpoint is
-    configured (they travel together). ``director`` is a mutable dict held by
-    reference and deliberately mutated in place — the regenerate paths reset its
-    ``active_moods`` / ``progressive_fields`` to the branch baseline before a turn,
-    which the frozen dataclass does not prevent (it guards rebinding the field,
-    not mutating the dict it points at).
+    Frozen so field bindings are immutable. ``card`` and ``active_persona`` are
+    None when absent. ``agent_client`` and ``agent_system_prompt`` are both None
+    unless a separate agent endpoint is configured. ``director`` is a mutable
+    dict deliberately mutated in place — the regenerate paths reset its
+    ``active_moods`` and ``progressive_fields`` to the branch baseline, which the
+    frozen dataclass allows (it guards rebinding, not mutating the pointed-at dict).
     """
 
     settings: SettingsRow
@@ -85,16 +77,14 @@ class PipelineContext:
 
 
 async def _load_pipeline_context(conversation_id: str, *, abort_token: AbortToken | None = None) -> PipelineContext | None:
-    """Load all per-conversation inputs needed to run the pipeline.
+    """Load all per-conversation data needed by the pipeline.
 
-    Fetches settings, conversation, character card, director state, fragments,
-    phrase bank, lorebook entries, and builds LLM clients. Both the writer and
-    agent clients share the same *abort_token* so a single ``/stop`` cancels
-    every pass. Creates a private token when none is supplied.
+    Fetches settings, conversation, card, director state, fragments, phrase bank,
+    lorebook entries, and builds LLM clients. Both clients share the same
+    *abort_token* so a single stop cancels every pass; a private token is created
+    when none is supplied.
 
-    Returns a :class:`PipelineContext`, or ``None`` if the conversation was not found.
-
-    Called by every public entry point before any pipeline work begins.
+    Returns a :class:`PipelineContext`, or ``None`` if the conversation is missing.
     """
     abort_token = abort_token or AbortToken()
     settings = await db.get_settings()
@@ -171,11 +161,9 @@ def _build_prefix_from_ctx(
 ) -> list[ChatMessage]:
     """Build the LLM message prefix (system prompt + chat history) from *ctx*.
 
-    *system_prompt* overrides ``ctx.system_prompt`` when provided — used for
-    the agent prefix in dual-model mode. *extra_system_blocks* appends
-    additional system sections contributed by pre-pipeline hooks.
-
-    Called by :func:`_build_prefixes`.
+    *system_prompt* overrides ``ctx.system_prompt`` when given — used for the
+    agent prefix in dual-model mode. *extra_system_blocks* are additional system
+    sections contributed by pre-pipeline workflow hooks.
     """
     conv = ctx.conv
     active_persona = ctx.active_persona
@@ -203,12 +191,9 @@ def _build_prefixes(
 ) -> tuple[list[ChatMessage], list[ChatMessage] | None]:
     """Build the writer prefix and optional agent prefix for a turn.
 
-    Returns ``(prefix, agent_prefix)``. ``agent_prefix`` is ``None`` when no
-    separate agent system prompt is configured (single-model mode).
-    *extra_system_blocks* from pre-pipeline hooks is applied to both so the
-    system body stays identical across all passes.
-
-    Called by :func:`_prepare_turn`.
+    Returns ``(prefix, agent_prefix)``. ``agent_prefix`` is ``None`` in
+    single-model mode. *extra_system_blocks* from pre-pipeline hooks are applied
+    to both so the system body stays identical across all passes.
     """
     prefix = _build_prefix_from_ctx(ctx, history, extra_system_blocks=extra_system_blocks)
     agent_sp = ctx.agent_system_prompt
@@ -228,7 +213,7 @@ def _build_prefixes(
 def _compute_lorebook(macros: Macros, ctx: PipelineContext, messages: Sequence[Mapping[str, Any]]) -> str:
     """Scan *messages* for lorebook keyword matches and return the injection block.
 
-    Called by :func:`_prepare_turn` when agentic lorebook mode is off.
+    Used when agentic lorebook mode is off and the director doesn't pick entries.
     """
     return compute_lorebook_injection_block(
         messages,
@@ -239,13 +224,11 @@ def _compute_lorebook(macros: Macros, ctx: PipelineContext, messages: Sequence[M
 
 @dataclass
 class _TurnSetup:
-    """Resolved per-turn pipeline inputs produced by :func:`_prepare_turn`.
+    """Per-turn inputs produced by :func:`_prepare_turn`, ready for ``_run_pipeline``.
 
-    Bundles everything the entry points compute identically between persisting
-    the user row and launching ``_run_pipeline``: the (writer, agent) prefixes
-    with any pre-pipeline ``system_prompt`` blocks already applied, the merged
-    tool-enable map, and the per-turn shared identities (macros, lorebook
-    block, scratch dict, KV tracker, dynamic-schema map).
+    Holds the (writer, agent) prefixes with any pre-pipeline system blocks
+    already applied, the merged tool-enable map, macros, lorebook block, scratch
+    dict, KV tracker, and dynamic-schema map.
     """
 
     prefix: list[ChatMessage]
@@ -275,9 +258,9 @@ async def _prepare_turn(
 ) -> AsyncIterator[dict | _TurnSetup]:
     """Prepare everything a turn needs before the pipeline starts.
 
-    Builds macros, prefixes, tool maps, the lorebook block, runs pre-pipeline
-    workflow hooks (which may stream SSE events), then yields a single
-    :class:`_TurnSetup` as the last item.
+    Builds macros, prefixes, tool maps, and the lorebook block; runs
+    pre-pipeline workflow hooks (which may stream SSE events); then yields a
+    single :class:`_TurnSetup` as the last item.
 
     Drain it as::
 
@@ -288,8 +271,6 @@ async def _prepare_turn(
             else:
                 yield ev
         assert setup is not None
-
-    Called by ``entrypoints._generate_reply`` for every generating entry point.
     """
     macros = Macros.from_settings(ctx.settings, ctx.conv["character_name"], ctx.active_persona)
 

@@ -1,7 +1,6 @@
 """
-passes/director/director.py — Director pass: the pre-processing phase that selects
-moods, plot direction, and optionally rewrites the user's prompt before
-the writer pass runs.
+passes/director/director.py — The director pass: selects moods and plot direction,
+and optionally rewrites the user's prompt before the writer runs.
 """
 
 from __future__ import annotations
@@ -50,18 +49,14 @@ def _agentic_lorebook_active(
     *,
     agent_on: bool,
 ) -> bool:
-    """Whether the Director drives lorebook activation this turn.
+    """Return True when the director should pick lorebook entries this turn.
 
-    True only when the feature flag is on, the agent + ``direct_scene`` are on,
-    and at least one *non-constant* candidate entry exists to offer in the
-    catalog. Constant entries are always injected and never managed by the
-    Director, so a pool of only constants does not enable agentic mode. Both
-    tools-blob call sites (the main turn and magic-rewrite) read the same
-    settings/entries through this helper, so the cached blob stays consistent.
+    Requires the feature flag, ``direct_scene`` enabled, and at least one
+    non-constant entry. Constant entries are always injected and never managed
+    by the director, so a pool of only constants does not enable agentic mode.
 
-    *agent_on* is passed in (rather than recomputed) so the orchestrator's
-    ``agent_enabled`` stays the single source of truth — mirroring
-    ``resolve_length_guard``.
+    *agent_on* is passed in (rather than recomputed) so ``agent_enabled`` stays
+    the single source of truth — mirroring ``resolve_length_guard``.
     """
     if not bool(settings.get("agentic_lorebook_enabled", 0)):
         return False
@@ -77,11 +72,10 @@ def build_direct_scene_override(
     *,
     agentic_lorebook: bool,
 ) -> dict:
-    """Build the ``direct_scene`` dynamic-tool schema from *writer_fragments*.
+    """Build the ``direct_scene`` tool schema from *writer_fragments*.
 
-    Thin wrapper over :func:`~backend.inference.tool_registry.build_direct_scene_tool` so the
-    orchestrator's tools-blob composition (``_build_writer_tools_blob``) reaches
-    the direct_scene schema through the director module rather than importing the
+    Thin wrapper over ``build_direct_scene_tool`` so ``_build_writer_tools_blob``
+    reaches the schema through the director module rather than importing the
     schema builder directly — symmetric to ``build_feedback_override``.
     """
     return build_direct_scene_tool(writer_fragments, agentic_lorebook=agentic_lorebook)
@@ -89,17 +83,13 @@ def build_direct_scene_override(
 
 @dataclass
 class DirectorResult:
-    """Typed payload of the director pass's terminal ``done`` event.
+    """Typed result of the director pass, yielded as the ``done`` event payload.
 
-    Field names match the orchestrator's turn-state locals and
-    :class:`~backend.pipeline.state.TurnState` (notably ``agent_raw``,
-    ``rewritten_msg``) so a single name follows each value end to end. This
-    replaces the former 6-positional ``result`` tuple: adding or reordering a
-    field can no longer silently transpose values at the unpack site.
+    Field names match ``TurnState`` (e.g. ``agent_raw``, ``rewritten_msg``) so
+    the same name follows each value from the pass through to persistence.
 
-    ``progressive_fields`` is intentionally absent — it is derived in the
-    orchestrator from ``extra_fields`` filtered against the valid progressive
-    fragment ids, which the director pass does not know about.
+    ``progressive_fields`` is absent — it is derived in the orchestrator by
+    filtering ``extra_fields`` against the valid progressive fragment ids.
     """
 
     active_moods: list[str] = field(default_factory=list)
@@ -120,10 +110,10 @@ def apply_tool_calls(
 ) -> tuple[list[str], str | None, dict, list[str]]:
     """Extract values from tool calls.
 
-    Returns (moods, refined_message, extra_fields, selected_lorebook_entries).
-    extra_fields contains all direct_scene args except moods and selected_lorebook_entries.
-    selected_lorebook_entries is the Director's agentic lorebook selection (entry names);
-    it is pulled out explicitly so it never renders as a Scene Direction field.
+    Returns ``(moods, refined_message, extra_fields, selected_lorebook_entries)``.
+    ``extra_fields`` holds all ``direct_scene`` args except moods and lorebook
+    entries. ``selected_lorebook_entries`` is pulled out explicitly so it never
+    renders as a Scene Direction field.
     """
     moods = list(current_moods)
     refined: str | None = None
@@ -164,11 +154,11 @@ async def director_pass(
     lorebook_catalog: str = "",
     progressive_state: dict | None = None,
 ) -> AsyncIterator[dict]:
-    """Yields reasoning dicts during each tool call, then a single done dict.
+    """Yield reasoning chunks during each tool call, then a single done dict.
 
     Yields:
-        {"type": "reasoning", "delta": str}        — zero or more reasoning chunks
-        {"type": "done", "result": DirectorResult}  — terminal pass result
+        ``{"type": "reasoning", "delta": str}``       — zero or more reasoning chunks
+        ``{"type": "done", "result": DirectorResult}`` — terminal pass result
     """
     active_moods = director["active_moods"]
     if attachments is None:
@@ -290,17 +280,14 @@ async def director_stage(
     agentic_lorebook: bool,
     macros: "Macros",
 ) -> AsyncIterator[dict]:
-    """Director stage: input-prep + director pass + all of its output
-    post-processing, owned here so the orchestrator only sequences passes.
+    """Input-prep + director pass + all post-processing for the director stage.
 
     Runs the director pass (when the agent is on and a pre-writer tool is
-    enabled), folding its :class:`DirectorResult` into *state*; applies the
-    optional prompt rewrite; computes the style-injection block (→
-    ``director_done``); and computes the writer's lorebook block (agentic
-    selection vs. the keyword-scanned block). Returns early on a director-phase
-    abort so ``director_done`` and the style/lorebook work are skipped — the
-    orchestrator's own post-stage abort check then halts before the writer (the
-    writer and agent clients share one abort token).
+    enabled), folds the :class:`DirectorResult` into *state*, applies the
+    optional prompt rewrite, computes the style-injection block (→
+    ``director_done``), and computes the writer's lorebook block (agentic
+    selection or keyword scan). Returns early on a stop during the director pass
+    so ``director_done`` and lorebook work are skipped.
     """
     # --- Director pass ---
     has_pre_writer_tools = any(cfg.enabled_tools.get(n, False) for n in PRE_WRITER_TOOLS)

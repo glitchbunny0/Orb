@@ -1,21 +1,15 @@
 """
-state.py — The per-turn contract dataclasses shared across passes.
+state.py — Per-turn dataclasses shared across passes.
 
-``ModelLane`` / ``_PipelineConfig`` / ``TurnState`` are the turn-state contract
-every pass reads: the orchestrator builds them and the director / writer / editor
-passes consume them. They live here — a focused leaf the passes point *down* into
-— rather than at the top in ``orchestrator.py``, so the dependency runs one
-direction (passes → ``state``) instead of the passes reaching up into the
-coordinator.
+``ModelLane``, ``_PipelineConfig``, and ``TurnState`` are built by the
+orchestrator and consumed by the director, writer, and editor passes. They live
+here so the passes depend downward into ``state`` rather than upward into the
+orchestrator.
 
-Only the dataclass *shapes* live here. Their construction and behaviour
-(``_resolve_pipeline_config`` in ``config.py``, ``_make_result`` in
-``orchestrator.py``, ``is_dual_model`` in ``predicates.py``, …) stay with their
-callers. ``TurnState`` carries a turn end-to-end: the passes mutate it, the
-orchestrator projects its result-subset into the terminal ``_result`` event via
-``as_result_event_data``, and ``persistence._consume_pipeline`` rehydrates a
-``TurnState`` from that dict to drive the saves — so one object (not a separate
-result contract) follows each value from the director pass through to persistence.
+``TurnState`` travels the full turn: passes mutate it, the orchestrator
+serializes a result-subset into the ``_result`` SSE event via
+``as_result_event_data``, and persistence rehydrates a fresh ``TurnState`` from
+that dict to drive the saves.
 """
 
 from __future__ import annotations
@@ -30,20 +24,17 @@ from .passes.editor.length_guard import LengthGuard
 
 @dataclass(frozen=True)
 class ModelLane:
-    """One model's call surface for the turn: a client paired with its
-    byte-identical cached bottom (prefix + tools + model + the macro ``resolve``
-    hook that scrubs placeholders from the final wire bytes).
+    """One model's call surface for a turn: an LLM client paired with its
+    cached base (prefix + tool blob + model name + macro resolver).
 
     A turn has two lanes — ``writer`` and ``agent`` (director + editor). In
-    single-model mode they are the *same object* (the writer's lane is reused for
-    the agent), so the byte-identity invariant "director + editor + writer ride
-    the same base" is structural, not a convention each call site must honour. In
-    dual-model mode they are distinct: the agent lane carries the agent server's
-    client, its own prefix + tool blob, and the agent model; the writer lane
-    carries the writer client with an empty tools blob (Invariant 5).
+    single-model mode both lanes are the same object, making the KV-cache
+    byte-identity invariant structural rather than a per-call-site convention.
+    In dual-model mode the agent lane carries its own client and prefix, while
+    the writer lane has an empty tool blob (Invariant 5).
 
-    ``reasoning`` stays per-pass (director and editor share the agent lane but
-    toggle reasoning independently), so it is not part of the lane.
+    Reasoning is per-pass (director and editor share the agent lane but toggle
+    reasoning independently), so it is not part of the lane.
     """
 
     client: LLMClient
@@ -70,13 +61,11 @@ class _PipelineConfig:
     agent_lane: ModelLane
 
 
-# Result-subset of ``TurnState`` — the fields the terminal ``_result`` event
-# carries and that ``persistence`` reads back. Listed explicitly (rather than
-# all of ``TurnState``) so the wire dict stays the same JSON shape it was when a
-# separate result dataclass existed, and so non-result working fields
-# (``writer_content``, ``progressive_state``, ``valid_progressive_ids``, …) stay
-# off the wire. Every name here is a ``TurnState`` field with a default, so the
-# dict rehydrates cleanly via ``TurnState(**event["data"])``.
+# Fields the terminal ``_result`` event carries — a fixed subset of ``TurnState``
+# so the wire shape stays stable and working fields (``writer_content``,
+# ``progressive_state``, etc.) stay off the wire. Every name here is a
+# ``TurnState`` field with a default, so the dict rehydrates cleanly via
+# ``TurnState(**event["data"])``.
 _RESULT_FIELDS = (
     "active_moods",
     "agent_raw",
@@ -99,25 +88,18 @@ _RESULT_FIELDS = (
 
 @dataclass
 class TurnState:
-    """Mutable per-turn state threaded by reference through the three pass
-    stages (``director_stage`` / ``writer_stage`` / ``editor_stage``), then
-    carried out through persistence.
+    """Mutable state threaded through all three pass stages, then consumed by persistence.
 
-    These were ``_run_pipeline``'s ~20 turn-state locals. One object follows each
-    value from the director pass through to the save: the passes mutate it, the
-    orchestrator projects its result-subset (``_RESULT_FIELDS``) into the
-    terminal ``_result`` event via :meth:`as_result_event_data`, and
-    ``persistence._consume_pipeline`` rehydrates a fresh ``TurnState`` from that
-    dict. Every field defaults, so a turn aborted before ``_result`` fires (or a
-    test injecting a partial payload) still produces a usable instance.
+    Seeded at the start of ``_run_pipeline`` from the director state and user
+    message; mutated by each stage; serialized into the ``_result`` event by
+    ``as_result_event_data``; then rehydrated from that dict by persistence.
+    Every field has a default so a partially-completed turn (aborted or under
+    test) still produces a valid instance.
 
-    Seeded in ``_run_pipeline`` from ``director`` (``active_moods`` and the
-    progressive seed filtered to valid fragment ids) and the resolved
-    ``user_message`` (``effective_msg``). ``progressive_state`` /
-    ``valid_progressive_ids`` are turn inputs (not result fields): the director
-    seed map and the id set used to filter director output into
-    ``progressive_fields``. ``staged_attachments`` / ``staged_message_state`` are
-    set by the orchestrator from the post-pipeline workflow hooks just before
+    ``progressive_state`` and ``valid_progressive_ids`` are inputs, not outputs:
+    they hold the director's seed values and the id set used to filter its output
+    into ``progressive_fields``. ``staged_attachments`` / ``staged_message_state``
+    are set by the orchestrator from post-pipeline workflow hooks just before
     ``_result`` is emitted.
     """
 
@@ -152,7 +134,8 @@ class TurnState:
     staged_message_state: dict = field(default_factory=dict)
 
     def as_result_event_data(self) -> dict:
-        """Shallow result-subset dict for the ``_result`` SSE envelope. Shallow
-        on purpose: ``staged_attachments`` carries raw artifact bytes that must
-        not be deep-copied."""
+        """Return the result-subset dict for the ``_result`` SSE envelope.
+
+        Shallow copy on purpose: ``staged_attachments`` carries raw artifact bytes.
+        """
         return {name: getattr(self, name) for name in _RESULT_FIELDS}

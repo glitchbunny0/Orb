@@ -1,30 +1,25 @@
 """
-kv_tracker.py — KV-cache hit/miss tracker shared across passes.
+kv_tracker.py — Per-turn KV cache hit/miss tracker, shared across passes.
 
 Reports two views per LLM call:
 
-  1. Provider — ground truth. The ``usage`` field from each response is parsed
-     with fallbacks across OpenAI / Anthropic / DeepSeek / vLLM naming and
-     printed as ``cached/total`` tokens. This is the only number that
-     reconciles with your provider's billing dashboard.
+  1. Provider — ground truth from the ``usage`` field, parsed with fallbacks
+     across OpenAI / Anthropic / DeepSeek / vLLM naming. This is the only
+     number that reconciles with your provider's billing dashboard.
 
-  2. Local estimate — a debugging aid, NOT a prediction of the provider
-     number. We track two things separately:
-       - ``msgs_overlap``: char-prefix overlap of the messages list serialized
-         alone.  Captures whether system prompt + history + most of the final
-         user message are shared with the previous same-model call.
-       - ``tools_match``:  whether the tools list is byte-identical to the
+  2. Local estimate — a debugging aid, not a prediction of the provider
+     number. Two numbers reported separately:
+       - ``msgs_overlap``: char-prefix overlap of the serialised messages.
+         High means the system prompt + history were likely reused.
+       - ``tools_match``: whether the tools blob is byte-identical to the
          previous same-model call.
 
-     We deliberately do NOT combine these into a single "estimated hit
-     percentage." Where the chat template renders tools (start vs. end of the
-     system block vs. before the final user turn) determines whether a tools
-     diff actually breaks the wire-level cache, and the tracker has no way to
-     know that. Two split numbers + provider truth lets a human read both
-     failure modes:
-       - msgs_overlap high, tools_match False → cache may or may not hold;
-         provider number tells you which.
-       - msgs_overlap low                     → cache is broken regardless.
+     These are kept separate because where the chat template renders tools
+     determines whether a tools diff actually breaks the wire-level cache,
+     and the tracker cannot know that. Use them to spot failure modes:
+       - msgs_overlap high, tools_match False → cache may or may not hold
+         (check provider number).
+       - msgs_overlap low → cache is broken regardless.
 """
 
 from __future__ import annotations
@@ -40,12 +35,12 @@ _prev_turn_entries: dict[str, list[dict]] = {}
 
 
 def _serialize_messages(messages: Sequence[Mapping[str, Any]]) -> str:
-    """Compact JSON serialization of a messages list; sort_keys for byte-stable output regardless of dict construction order."""
+    """Compact, byte-stable JSON for a messages list (sorted keys)."""
     return "\n".join(json.dumps(m, separators=(",", ":"), sort_keys=True) for m in messages)
 
 
 def _serialize_tools(tools: list[dict] | None) -> str:
-    """Compact, order-deterministic JSON for tools. Empty string when no tools."""
+    """Compact, order-deterministic JSON for a tools list. Empty string when ``tools`` is empty."""
     if not tools:
         return ""
     return json.dumps(tools, separators=(",", ":"), sort_keys=True)
@@ -60,20 +55,17 @@ def _common_prefix_len(a: str, b: str) -> int:
 
 
 def extract_cache_stats(usage: dict | None) -> dict:
-    """Pull cache hit / write / total token counts from a provider ``usage``
-    dict, with fallbacks across naming conventions.
+    """Extract cache hit/write/total token counts from a provider ``usage`` dict.
 
-    Recognises:
-      - OpenAI / vLLM / llama.cpp:  usage.prompt_tokens_details.cached_tokens
-      - Anthropic:                  usage.cache_read_input_tokens,
-                                    usage.cache_creation_input_tokens
-      - DeepSeek:                   usage.prompt_cache_hit_tokens
+    Recognises naming conventions across providers:
+      - OpenAI / vLLM / llama.cpp: ``prompt_tokens_details.cached_tokens``
+      - Anthropic: ``cache_read_input_tokens``, ``cache_creation_input_tokens``
+      - DeepSeek: ``prompt_cache_hit_tokens``
 
     Returns ``prompt_tokens``, ``cached_tokens``, ``cache_write_tokens``, and
-    ``source`` (which field path was used — useful when debugging why a
-    provider's numbers look off). When ``usage`` is missing or unrecognized,
-    counts are 0 and ``source`` distinguishes "missing", "unrecognized", and
-    "no_cache_fields" so callers can tell "no data" from a real zero.
+    ``source`` (the field path used — handy when debugging provider numbers).
+    When ``usage`` is missing or unrecognised, counts are 0 and ``source`` is
+    one of ``"missing"``, ``"unrecognized"``, or ``"no_cache_fields"``.
     """
     if not isinstance(usage, dict):
         return {
@@ -132,7 +124,7 @@ class _KVCacheTracker:
         tools: list[dict] | None,
         model: str = "",
     ) -> None:
-        """Snapshot a single LLM call. Call once per pass (or per tool in director)."""
+        """Snapshot one LLM call (messages + tools). Call once per pass or per director tool."""
         msgs_serialized = _serialize_messages(messages)
         tools_serialized = _serialize_tools(tools)
         self._entries.append(
@@ -149,7 +141,7 @@ class _KVCacheTracker:
         )
 
     def record_usage(self, label: str, usage: dict | None) -> None:
-        """Attach the provider's ``usage`` dict to the most recent entry with this label."""
+        """Attach the provider ``usage`` dict to the most recent entry for *label*."""
         for entry in reversed(self._entries):
             if entry["label"] == label:
                 entry["usage"] = usage
@@ -157,8 +149,12 @@ class _KVCacheTracker:
         logger.debug("record_usage: no prior record() for label=%r, dropping", label)
 
     def _find_prev(self, i: int, model: str, label: str) -> tuple[dict | None, bool]:
-        """Return (prev_entry, is_cross_turn). Matches same-model first within
-        this turn, then falls back to same-(label, model) from the previous turn."""
+        """Find the previous entry to compare against.
+
+        Prefers the nearest same-model entry within this turn; falls back to
+        the same (label, model) entry from the previous turn.
+        Returns ``(entry, is_cross_turn)``.
+        """
         for j in range(i - 1, -1, -1):
             if self._entries[j].get("model", "") == model:
                 return self._entries[j], False

@@ -1,17 +1,13 @@
 """
-orchestrator.py — The three-pass coordinator: director → writer → editor.
+orchestrator.py — Sequences the three passes for one turn.
 
-Pared down to one job: run the passes for a single turn and project the result.
-:func:`_run_pipeline` resolves the per-turn config (``config``), threads a
-mutable :class:`TurnState` through ``director_stage`` / ``writer_stage`` /
-``editor_stage`` (``passes/``), drives the POST_PIPELINE workflow hooks
-(``workflow_bridge``), and emits the terminal ``_result`` event built by
-:func:`_make_result`.
+:func:`_run_pipeline` resolves the per-turn config, threads a mutable
+:class:`TurnState` through the director, writer, and editor stages, runs
+POST_PIPELINE workflow hooks, and emits the terminal ``_result`` event.
 
-Everything *around* the passes lives elsewhere: inbound load + setup in
-``context``, outbound persistence in ``persistence``, the public turn entry
-points + the ``_generate_reply`` driver in ``entrypoints``. ``_run_pipeline`` is
-called by ``entrypoints._generate_reply`` (and directly by tests).
+Context loading lives in ``context``, persistence in ``persistence``, and the
+public entry points in ``entrypoints``. ``_run_pipeline`` is called by
+``_generate_reply`` (and directly by tests).
 """
 
 from __future__ import annotations
@@ -36,11 +32,12 @@ logger = logging.getLogger(__name__)
 
 
 def _make_result(state: TurnState, staged: list[dict] | None = None, staged_state: dict | None = None) -> dict:
-    """Project the mutable :class:`TurnState` into the pipeline's terminal
-    ``_result`` SSE event. *staged* / *staged_state* carry the post-pipeline
-    workflow attachments and per-message state (empty on the writer-abort path,
-    which fires before that iteration); they are folded onto *state* so the whole
-    result rides one object."""
+    """Build the terminal ``_result`` SSE event from *state*.
+
+    *staged* / *staged_state* are workflow attachments and per-message state
+    produced by post-pipeline hooks; they are folded onto *state* before
+    serialization so the whole result travels as one object.
+    """
     state.staged_attachments = staged or []
     state.staged_message_state = staged_state or {}
     return {"event": "_result", "data": state.as_result_event_data()}
@@ -75,17 +72,15 @@ async def _run_pipeline(
     history: Sequence[Mapping[str, Any]] | None = None,
     lorebook_messages: Sequence[Mapping[str, Any]] | None = None,
 ) -> AsyncIterator[dict]:
-    """Run the three-pass pipeline (director → writer → editor) for one turn.
+    """Run the director → writer → editor passes for one turn.
 
-    Streams SSE events as each pass runs, then drives the post-pipeline
-    workflow hooks and emits a single ``_result`` event carrying the final
-    draft and any workflow-staged attachments.
+    Streams SSE events as each pass runs, then runs post-pipeline workflow
+    hooks and emits a single ``_result`` event with the final draft and any
+    workflow attachments.
 
-    If the user stops generation during the director pass the pipeline exits
-    cleanly with no output. If they stop during the writer pass the partial
-    draft is still carried out via ``_result`` so the caller can persist it.
-
-    Called by ``entrypoints._generate_reply`` for every generating entry point.
+    A stop during the director pass exits cleanly with no output. A stop during
+    the writer pass still emits ``_result`` with the partial draft so persistence
+    can save it.
     """
     if macros is None:
         macros = Macros("User", "")

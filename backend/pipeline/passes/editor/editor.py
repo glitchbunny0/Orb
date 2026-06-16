@@ -1,6 +1,6 @@
 """
-editor.py — Editor pass: the post-processing phase that runs a
-ReAct-style LLM loop that fixes audit issues in Writer's output.
+editor.py — The editor pass: a ReAct-style loop that fixes audit issues in
+the writer's output.
 """
 
 from __future__ import annotations
@@ -50,23 +50,21 @@ def _feedback_active(
     *,
     agent_on: bool,
 ) -> bool:
-    """Feedback runs only when its flag is on, the agent is on, AND an enabled
-    feedback fragment exists.
+    """Return True when the feedback step should run this turn.
 
-    The feedback step is an editor sub-step, so this gate lives with the editor.
-    *agent_on* is passed in (rather than recomputed) so the orchestrator's
-    ``agent_enabled`` stays the single source of truth — mirroring how
-    ``resolve_length_guard`` takes ``agent_on``.
+    Requires the feedback flag, the agent on, and at least one enabled feedback
+    fragment. *agent_on* is passed in (rather than recomputed) so
+    ``agent_enabled`` stays the single source of truth — mirroring
+    ``resolve_length_guard``.
     """
     return agent_on and bool(settings.get("feedback_enabled", 0)) and bool(feedback_fragments)
 
 
 def build_feedback_override(feedback_fragments: Sequence[Mapping[str, Any]]) -> dict:
-    """Build the ``give_feedback`` dynamic-tool schema from *feedback_fragments*.
+    """Build the ``give_feedback`` tool schema from *feedback_fragments*.
 
-    Thin wrapper over :func:`~backend.inference.tool_registry.build_feedback_tool` so the
-    orchestrator's tools-blob composition (``_build_writer_tools_blob``) reaches
-    the give_feedback schema through the editor module rather than importing the
+    Thin wrapper over ``build_feedback_tool`` so ``_build_writer_tools_blob``
+    reaches the schema through the editor module rather than importing the
     schema builder directly — symmetric to ``build_direct_scene_override``.
     """
     return build_feedback_tool(feedback_fragments)
@@ -81,10 +79,9 @@ def _split_target_sentences(target_text: str) -> set[str]:
 
 
 def _filter_flagged_items(items, sentences: set[str], total: int, *, cls, label_field: str):
-    """Shared helper: filter a list of FlaggedOpener or FlaggedTemplate to
-    only include sentences present in *sentences*.
+    """Filter a list of FlaggedOpener or FlaggedTemplate to sentences in *sentences*.
 
-    Returns a list of *cls* instances (with adjusted count / fraction).
+    Returns a list of *cls* instances with adjusted count and fraction.
     """
     filtered = []
     for item in items:
@@ -106,8 +103,8 @@ def _filter_flagged_items(items, sentences: set[str], total: int, *, cls, label_
 def filter_audit_report_to_text(report: AuditReport, target_text: str) -> AuditReport:
     """Narrow an audit report to only flag sentences that appear in *target_text*.
 
-    Used when the audit ran on concatenated text (current + previous messages)
-    but we only want to surface issues in the latest message.
+    Used when the audit ran on concatenated text (draft + previous messages) but
+    only issues in the draft itself should be surfaced.
     """
     target_sents = _split_target_sentences(target_text)
 
@@ -177,8 +174,8 @@ def filter_audit_report_to_text(report: AuditReport, target_text: str) -> AuditR
 
 
 def _build_audit_text(draft: str, previous_assistant_msgs: list[str]) -> str:
-    """Concatenate previous assistant messages (oldest→newest) with the current
-    *draft* so that repetition detectors can see cross-message patterns."""
+    """Concatenate previous assistant messages (oldest→newest) with *draft*
+    so repetition detectors can see cross-message patterns."""
     if not previous_assistant_msgs:
         return draft
     context = "\n\n".join(reversed(previous_assistant_msgs))
@@ -191,8 +188,10 @@ def _run_contextual_audit(
     previous_assistant_msgs: list[str],
     audit_toggles: dict | None = None,
 ) -> tuple[AuditReport, str]:
-    """Run audit on *draft* with cross-message context, then filter results
-    to only include issues in the draft itself.  Returns (report, report_text)."""
+    """Run the audit on *draft* with cross-message context, filtered to the draft.
+
+    Returns ``(report, report_text)``.
+    """
     full_text = _build_audit_text(draft, previous_assistant_msgs)
     # run_audit will append the current text to assistant_messages internally
     raw_report = run_audit(
@@ -245,7 +244,7 @@ def _strip_outer_asterisks(text: str) -> str:
 
 
 def apply_patches(draft: str, patches: list[dict]) -> tuple[str, list[str]]:
-    """Apply search/replace patches to *draft*.  Returns (updated_draft, error_messages)."""
+    """Apply search/replace patches to *draft*. Returns ``(updated_draft, error_messages)``."""
     errors: list[str] = []
     logger.debug("Applying %d patches to draft (%d chars)", len(patches), len(draft))
 
@@ -355,23 +354,18 @@ async def editor_pass(
     writer_user_msg: "str | list[ContentPart] | None" = None,
     feedback_fragments: "Sequence[Mapping[str, Any]] | None" = None,
 ) -> AsyncIterator[dict]:
-    """Editor pass = the ReAct edit loop, then an optional feedback sub-step.
+    """Run the ReAct edit loop, then the optional feedback sub-step.
 
-    The edit loop fixes audit/length-guard issues in *draft*. Afterwards, if any
-    ``field_type='feedback'`` interactive fragments are passed, a feedback step
-    runs on the final (edited) text to produce an out-of-character note for the
-    user. Feedback is an editor sub-step, not a top-level pass: it shares the
-    editor's reasoning toggle (``reasoning_on``), its reasoning channel (deltas
-    are tagged ``pass="editor"``), and its ``elapsed`` timing — only the
-    user-facing note is surfaced separately. Its single LLM call reuses the
-    shared base: give_feedback rides the shared tools blob, and the call replays
-    writer_user_msg + reply so it extends the writer/editor KV-cached prefix
-    rather than busting it.
+    The edit loop fixes audit and length-guard issues in *draft*. If any
+    ``field_type='feedback'`` fragments are provided, a feedback step runs
+    on the final text to produce an out-of-character note for the user.
+    Feedback shares the editor's reasoning toggle, reasoning channel, and
+    ``elapsed`` timing — only the user-facing note is surfaced separately.
 
     Yields:
-        {"type": "reasoning", "delta": str, "pass": "editor"}
-        {"type": "done", "draft": str|None, "debug": str, "elapsed": int,
-         "tool_calls": list (when the edit loop ran), "feedback": dict}
+        ``{"type": "reasoning", "delta": str, "pass": "editor"}``
+        ``{"type": "done", "draft": str|None, "debug": str, "elapsed": int,
+         "tool_calls": list, "feedback": dict}``
     """
     t0 = time.monotonic()
     edit_done: dict | None = None
@@ -438,15 +432,12 @@ async def editor_stage(
     editor_audit_msgs: list[str] | None,
     kv_tracker: _KVCacheTracker,
 ) -> AsyncIterator[dict]:
-    """Editor stage: gating + the writer→editor boundary event + editor pass +
-    event translation, owned here so the orchestrator only sequences passes.
+    """Gating + writer→editor boundary event + editor pass + event translation.
 
     Decides whether the editor runs (``cfg.do_edit`` or feedback wanted, given a
-    non-empty draft), emits the authoritative ``writer_done`` boundary, then runs
-    :func:`editor_pass` translating its ``reasoning`` / ``writer_rewrite`` /
-    ``editor_done`` / ``feedback`` events and folding the edit/feedback results
-    back into *state* (``resp_text``, ``reasoning_editor``, ``feedback_values``,
-    ``latency``).
+    non-empty draft), emits the ``writer_done`` boundary, then runs
+    :func:`editor_pass` and folds the results back into *state* (``resp_text``,
+    ``reasoning_editor``, ``feedback_values``, ``latency``).
     """
     # The feedback step is an editor sub-step (post-processing on the final text),
     # not a top-level pass: it shares the editor's reasoning channel and timing and
@@ -547,11 +538,11 @@ async def _run_edit_loop(
     ) = None,  # explicit previous-assistant list for repetition scanning; if None, derived from base.prefix
     writer_user_msg: "str | list[ContentPart] | None" = None,  # writer's exact last user message; when provided replaces bare effective_msg so the editor extends the writer's KV-cached prefix
 ) -> AsyncIterator[dict]:
-    """ReAct-style editor loop with optional audit and/or length guard.
+    """ReAct-style edit loop with optional audit and/or length guard.
 
     Yields:
-        {"type": "reasoning", "delta": str}                      — reasoning chunks per iteration
-        {"type": "done", "draft": str|None, "debug": str, "elapsed": int}
+        ``{"type": "reasoning", "delta": str}``
+        ``{"type": "done", "draft": str|None, "debug": str, "elapsed": int}``
     """
     t0 = time.monotonic()
     debug_parts: list[str] = []
@@ -905,7 +896,7 @@ def _structural_rewrite_needed(report: AuditReport) -> bool:
 
 
 def _pick_tool_choice(length_guard_triggered: bool, report: AuditReport, audit_enabled: bool):
-    """Determine the tool_choice parameter for the editor LLM call."""
+    """Return the ``tool_choice`` value for the editor LLM call."""
     if length_guard_triggered or _structural_rewrite_needed(report):
         return {"type": "function", "function": {"name": "editor_rewrite"}}
     if audit_enabled:
@@ -922,12 +913,12 @@ def _append_iteration_context(
     *,
     reasoning_on: bool,
 ):
-    """Append assistant recap and tool-result turns for the next iteration.
+    """Append the assistant recap and tool-result turns for the next iteration.
 
-    reasoning_on=True: use structured tool-use format so the model can see its
-    exact tool call and the remaining issues in the form it was trained on.
-    reasoning_on=False: use a human-readable synthetic recap which is more
-    reliable for non-thinking models.
+    ``reasoning_on=True``: structured tool-use format (role=tool) so the model
+    sees its exact call and the remaining issues in the form it was trained on.
+    ``reasoning_on=False``: a human-readable recap, more reliable for models
+    without reasoning.
     """
     tool_response = ("\n".join(errors) + "\n\n" if errors else "") + report_text
     if reasoning_on:

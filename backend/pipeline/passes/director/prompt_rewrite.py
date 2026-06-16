@@ -1,21 +1,16 @@
 """
-passes/director/prompt_rewrite.py — The user-prompt-rewrite feature, in one place.
+passes/director/prompt_rewrite.py — The user-prompt-rewrite feature.
 
-The feature rewrites a vague user message into a fuller prompt before the writer
-runs, via the ``rewrite_user_prompt`` tool. The director executes it *first* (see
-:func:`order_director_tools`) so a user who dislikes the rewrite can abort before
-the full director runs; its reasoning is suppressed (:func:`suppresses_reasoning`)
-because the rephrase is mechanical and latency-sensitive. The orchestrator then
-swaps in the rewritten text as the writer's effective message
-(:func:`apply_rewrite`), emits the ``prompt_rewritten`` SSE event, and persists the
-overwrite — those I/O steps stay in the orchestrator; this module is pure.
+Rewrites a vague user message into a fuller prompt before the writer runs, via
+the ``rewrite_user_prompt`` tool. The director runs it first (see
+:func:`order_director_tools`) so a user can stop before the full director runs
+if they don't like the result; its reasoning is suppressed because the rephrase
+is mechanical and adds latency.
 
-The tool *schema* deliberately stays in ``tool_registry.py`` (``REWRITE_PROMPT_TOOL``
-in the ``TOOLS`` registry): it is part of the cached tools blob sent to the LLM, so
-moving it would bust the KV cache. The instruction template and its formatter live
-in ``prompt_builder.py`` (``build_rewrite_prompt``) next to the rest of prompt
-assembly; only the Python glue around the tool relocates here — mirroring how
-``length_guard.py`` leaves the ``editor_rewrite`` schema in ``tool_registry.py``.
+The tool schema stays in ``tool_registry.py`` (part of the cached tool blob;
+moving it would bust the KV cache). The instruction template lives in
+``prompt_builder.py``. Only the Python glue lives here — matching the pattern in
+``length_guard.py``.
 """
 
 from __future__ import annotations
@@ -28,41 +23,38 @@ REWRITE_TOOL_NAME = "rewrite_user_prompt"
 
 
 def extract_rewritten_message(args: Mapping[str, Any]) -> str | None:
-    """Pull the rewritten message out of a ``rewrite_user_prompt`` tool call.
+    """Pull the rewritten message from a ``rewrite_user_prompt`` tool call.
 
-    Returns the ``refined_message`` argument, or ``None`` when it is absent or
-    empty (so a blank rewrite is treated as "no rewrite" downstream).
+    Returns ``None`` when the argument is absent or empty (treated as no rewrite).
     """
     return args.get("refined_message") or None
 
 
 def order_director_tools(tool_names: Iterable[str]) -> list[str]:
-    """Order the director's tools so ``rewrite_user_prompt`` runs first.
+    """Sort director tools so ``rewrite_user_prompt`` runs first.
 
-    Rewrite-first lets a user who dislikes the rewrite abort early, before the
-    full director (mood/scene direction) runs. ``direct_scene`` follows; any other
-    tool sorts after both. The order is stable for unlisted tools.
+    Rewrite-first lets users abort early before the full director (mood/scene
+    direction) runs. ``direct_scene`` follows; other tools sort after both.
     """
     priority = [REWRITE_TOOL_NAME, "direct_scene"]
     return sorted(tool_names, key=lambda x: priority.index(x) if x in priority else len(priority))
 
 
 def suppresses_reasoning(name: str) -> bool:
-    """Whether tool *name* should run with reasoning disabled.
+    """Return True if tool *name* should run without reasoning.
 
-    ``rewrite_user_prompt`` does: it is a mechanical rephrase, and suppressing its
-    reasoning keeps the pre-writer latency the user waits through down.
+    ``rewrite_user_prompt`` does — it is a mechanical rephrase and suppressing
+    its reasoning reduces the pre-writer latency the user waits through.
     """
     return name == REWRITE_TOOL_NAME
 
 
 def apply_rewrite(user_message: str, rewritten_msg: str | None) -> tuple[str, bool]:
-    """Resolve the writer's effective message from the (optional) rewrite.
+    """Return the writer's effective message and whether a rewrite occurred.
 
-    Returns ``(effective_msg, did_rewrite)``: the rewritten text when present, else
-    the original *user_message*, plus a flag for whether a rewrite actually
-    happened. The orchestrator uses the flag to gate the ``prompt_rewritten`` SSE
-    emit and the DB overwrite; this only computes the swap (no I/O here).
+    Returns ``(effective_msg, did_rewrite)``. The orchestrator uses the flag to
+    gate the ``prompt_rewritten`` SSE event and the DB overwrite; this function
+    is pure (no I/O).
     """
     return (rewritten_msg or user_message, bool(rewritten_msg))
 
@@ -70,8 +62,7 @@ def apply_rewrite(user_message: str, rewritten_msg: str | None) -> tuple[str, bo
 def disable_rewrite(enabled_tools: Mapping[str, bool]) -> dict[str, bool]:
     """Return *enabled_tools* with ``rewrite_user_prompt`` forced off.
 
-    Used by super-regenerate, where the writer's input is an OOC steering message
-    that must not be rewritten. Mirrors :func:`apply_length_guard_tools` in
-    returning a fresh dict rather than mutating the input.
+    Used by super-regenerate, whose OOC steering message must not be rewritten.
+    Returns a fresh dict rather than mutating the input.
     """
     return {**enabled_tools, REWRITE_TOOL_NAME: False}

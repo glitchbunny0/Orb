@@ -1,23 +1,16 @@
 """Pipeline layer — the Director→Writer→Editor turn engine.
 
-Sits above ``workflows`` in the one-way order
-(``api → {pipeline, features} → workflows → {inference, analysis} → {core, database}``).
-The turn lifecycle is split into single-purpose modules:
+Each turn is handled by a chain of single-purpose modules:
 
-* ``predicates`` — dependency-free turn predicates (the package's ``core`` leaf)
-* ``state`` — per-turn contract dataclasses (``TurnState`` carries the result too)
-* ``config`` — per-turn config / tool-blob resolution
-* ``context`` — inbound load, prefixes, and pre-pipeline setup
-* ``workflow_bridge`` — the pre/post secondary-workflow hook loops
-* ``orchestrator`` — the three-pass coordinator (``_run_pipeline``)
-* ``persistence`` — outbound consume + persist
-* ``entrypoints`` — the public ``handle_*`` turn entry points + ``_generate_reply``
-* ``passes/`` — the individual passes
-
-The facade re-exports the public turn entry points and the per-turn contract
-types. Private symbols are reached via their owning module directly
-(``orchestrator._run_pipeline``, ``persistence._consume_pipeline``,
-``workflow_bridge._iterate_pre_pipeline_hooks``, …).
+* ``predicates`` — dependency-free helpers (the package's leaf, like ``core/``)
+* ``state`` — per-turn dataclasses shared across all passes
+* ``config`` — resolves flags, lanes, and the tool blob for a turn
+* ``context`` — loads conversation data and builds LLM prefixes
+* ``workflow_bridge`` — runs secondary-workflow hooks before and after the passes
+* ``orchestrator`` — sequences the three passes and collects the result
+* ``persistence`` — saves the assistant message and all turn side-effects
+* ``entrypoints`` — the five public ``handle_*`` functions called by routes
+* ``passes/`` — the director, writer, and editor passes
 """
 
 from __future__ import annotations

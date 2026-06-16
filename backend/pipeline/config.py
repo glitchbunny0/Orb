@@ -1,15 +1,14 @@
 """
 config.py — Per-turn configuration resolution.
 
-Turns the raw ``settings`` + enabled-tools map into the immutable
-:class:`_PipelineConfig` the passes run under: resolves feature flags, builds the
-two :class:`ModelLane` call surfaces (writer + agent), folds the length guard,
-and assembles the dynamic tool-schema overrides shared byte-identically by every
-cached call (so the LLM's KV cache is not busted across passes / magic-rewrite).
+Resolves settings and the enabled-tools map into the immutable
+:class:`_PipelineConfig` the passes run under: feature flags, the two
+:class:`ModelLane` call surfaces (writer + agent), length-guard config, and the
+dynamic tool-schema overrides that stay byte-identical across all passes (so the
+LLM's KV cache is not busted).
 
-Imports the pass modules (length guard, director ``direct_scene`` override,
-editor feedback) — which is why the dependency-free predicates live one level
-down in ``predicates.py`` rather than here.
+Imports the pass modules (length guard, director/editor overrides) — which is
+why the dependency-free predicates live in ``predicates.py`` rather than here.
 """
 
 from __future__ import annotations
@@ -42,12 +41,11 @@ def _resolve_pipeline_config(
     phrase_bank: list[PhraseGroup] | None,
     schema_overrides: Mapping[str, dict],
 ) -> _PipelineConfig:
-    """Build the immutable per-turn config used throughout the pipeline.
+    """Build the immutable per-turn config.
 
-    Resolves feature flags (audit, length guard, reasoning per pass), builds
-    the two model lanes (writer and agent), and returns a :class:`_PipelineConfig`.
-    Called once at the start of each turn by ``orchestrator._run_pipeline`` and
-    ``entrypoints.handle_magic_rewrite``.
+    Resolves feature flags (audit, length guard, per-pass reasoning), builds the
+    writer and agent lanes, and returns a :class:`_PipelineConfig`. Called once
+    per turn by ``_run_pipeline`` and ``handle_magic_rewrite``.
     """
     agent_on = agent_enabled(settings)
     reasoning_passes = settings.get("reasoning_enabled_passes") or {}
@@ -106,10 +104,10 @@ def _split_interactive_fragments(
 ) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
     """Split interactive fragments into writer vs. feedback groups.
 
-    Returns ``(writer_fragments, feedback_fragments)``. ``field_type="feedback"``
-    fragments are surfaced to the user via the post-writer feedback step and
-    never reach the writer prompt; all others shape the ``direct_scene`` tool
-    and the Scene Direction block.
+    Returns ``(writer_fragments, feedback_fragments)``. Feedback-type fragments
+    are surfaced to the user via the post-writer feedback step and never reach
+    the writer prompt; all others shape the ``direct_scene`` tool and Scene
+    Direction block.
     """
     writer = [df for df in fragments if df.get("field_type") != "feedback"]
     feedback = [df for df in fragments if df.get("field_type") == "feedback"]
@@ -123,14 +121,14 @@ def _build_writer_tools_blob(
     *,
     agentic_lorebook: bool = False,
 ) -> dict:
-    """Build the dynamic tool schema overrides shared by every writer-cached call.
+    """Build the dynamic tool-schema overrides shared across all cached calls.
 
-    Mutates *enabled_tools* in place to add ``give_feedback`` when feedback is
-    active. Returns the ``schema_overrides`` dict (``direct_scene`` plus
-    optionally ``give_feedback``) that keeps the tool blob byte-identical across
-    the main turn and magic-rewrite so the LLM's KV cache is not busted.
+    Mutates *enabled_tools* in place to add ``give_feedback`` when the feedback
+    step is active. Returns a ``schema_overrides`` dict (``direct_scene`` and
+    optionally ``give_feedback``) that stays byte-identical across the main turn
+    and magic-rewrite so the LLM's KV cache is not busted.
 
-    Called by ``context._prepare_turn`` and ``entrypoints.handle_magic_rewrite``.
+    Called by ``_prepare_turn`` and ``handle_magic_rewrite``.
     """
     writer_fragments, feedback_fragments = _split_interactive_fragments(interactive_fragments)
     overrides: dict = {"direct_scene": build_direct_scene_override(writer_fragments, agentic_lorebook=agentic_lorebook)}

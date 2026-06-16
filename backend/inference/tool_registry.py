@@ -1,5 +1,5 @@
 """
-tool_registry.py — Built-in tool schemas and the tool registry for the orchestrator pipeline.
+tool_registry.py — Built-in tool schemas and the tool registry.
 """
 
 from __future__ import annotations
@@ -43,13 +43,12 @@ def build_direct_scene_tool(
     *,
     agentic_lorebook: bool = False,
 ) -> dict:
-    """Build the direct_scene tool schema from enabled interactive fragments.
+    """Build the ``direct_scene`` tool schema from the enabled interactive fragments.
 
-    Interactive fragments provide dynamic string/array parameters beyond the fixed
-    moods and keywords fields. When *agentic_lorebook* is true, the fixed
-    ``selected_lorebook_entries`` array parameter is appended so the Director can activate
-    lorebook entries by name (the selectable catalog rides the director OOC, not
-    this schema). The returned dict is in OpenAI function-calling format.
+    Fragments add dynamic string/array parameters beyond the fixed ``moods``
+    field. When *agentic_lorebook* is ``True``, a ``selected_lorebook_entries``
+    array parameter is appended (the selectable catalog rides the director OOC
+    message, not this schema). Returns an OpenAI function-calling format dict.
     """
     properties: dict = {}
     required: list[str] = []
@@ -95,18 +94,15 @@ _GIVE_FEEDBACK_DESCRIPTION = (
 
 
 def build_feedback_tool(feedback_fragments: Sequence[Mapping[str, Any]]) -> dict:
-    """Build the give_feedback tool schema from enabled feedback fragments.
+    """Build the ``give_feedback`` tool schema from the enabled feedback fragments.
 
-    Each ``field_type="feedback"`` interactive fragment contributes a single
-    string parameter (keyed by fragment id); there are no fixed parameters. The
-    returned dict is in OpenAI function-calling format.
+    Each ``field_type="feedback"`` fragment contributes one string parameter
+    (keyed by fragment id); there are no fixed parameters. Returns an OpenAI
+    function-calling format dict.
 
-    ``give_feedback`` is registered in ``TOOLS`` (internal, feedback-flag-gated)
-    so its schema rides the shared per-turn tools blob exactly like
-    ``direct_scene``: the orchestrator builds it once from the enabled feedback
-    fragments and threads it via ``schema_overrides`` to every pass, keeping the
-    blob byte-identical. The post-writer feedback step then just forces
-    ``tool_choice=give_feedback`` on the unchanged shared base — no cache miss.
+    The schema rides the shared per-turn tools blob (via ``schema_overrides``)
+    so the post-writer feedback step can force ``tool_choice=give_feedback``
+    without a cache miss.
     """
     properties: dict = {}
     required: list[str] = []
@@ -264,7 +260,7 @@ STANDALONE_TOOLS: set[str] = set()
 
 
 def register_tool(name: str, schema: dict, choice: dict, *, standalone: bool = False) -> None:
-    """Register or replace a tool. Symmetric on the standalone bit."""
+    """Register or replace a tool in the registry."""
     TOOLS[name] = {"schema": schema, "choice": choice}
     if standalone:
         STANDALONE_TOOLS.add(name)
@@ -276,12 +272,12 @@ def enabled_schemas(
     enabled_tools: Mapping[str, bool] | None,
     overrides: Mapping[str, dict] | None = None,
 ) -> list[dict]:
-    """Return tool schemas for enabled, non-standalone tools, in TOOLS registry order.
+    """Return schemas for enabled, non-standalone tools in registry order.
 
-    ``enabled_tools=None`` returns every non-standalone schema. A dict selects
-    only entries whose value is truthy. ``overrides`` replaces named schemas
-    with dynamic variants so every pass sends a byte-identical tools blob; an
-    override whose value is None drops that name from the result.
+    ``enabled_tools=None`` returns every non-standalone schema. A dict
+    filters to entries with a truthy value. ``overrides`` replaces named
+    schemas with dynamic variants (e.g. the per-turn ``give_feedback``
+    schema); an override value of ``None`` drops that tool from the result.
     """
     overrides = overrides or {}
     eligible = [n for n in TOOLS if n not in STANDALONE_TOOLS]

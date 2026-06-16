@@ -1,6 +1,6 @@
 """
-prompt_builder.py — Functions that assemble system prompts, style injections,
-and tool-call prompts for the orchestrator pipeline.
+prompt_builder.py — Assembles system prompts, lorebook blocks, style
+injections, and tool-call request messages for the pipeline passes.
 """
 
 from __future__ import annotations
@@ -17,17 +17,16 @@ AGENTIC_LOREBOOK_SCAN_DEPTH = 2
 
 
 def format_message_with_attachments(message: Mapping[str, Any], macros: Macros | None) -> ChatMessage:
-    """Convert a message dict with optional attachments to OpenAI vision format.
+    """Convert a message dict to OpenAI chat format, embedding attachments.
 
-    Two attachment lists travel on the message dict:
-      - 'user_attachments': bytes embed as multimodal image_url parts on the
-        message content.
-      - 'workflow_attachments': bytes never enter the prefix. The 'annotation'
-        column on a root row (parent_attachment_id IS NULL) is appended to the
-        message text with a blank-line separator. Sibling variants and rows
-        with empty or whitespace-only annotations contribute nothing.
+    Two attachment lists on the message dict are handled differently:
+      - ``user_attachments``: embedded as multimodal ``image_url`` parts in
+        the message content.
+      - ``workflow_attachments``: their raw bytes never enter the prefix; only
+        the ``annotation`` of root rows (``parent_attachment_id IS NULL``) is
+        appended as text. Sibling variants and blank annotations contribute nothing.
 
-    Returns a dict with 'role' and 'content' (string or list of parts).
+    Returns ``{"role": ..., "content": str | list}``.
     """
     role = message["role"]
     raw = message.get("content", "")
@@ -126,14 +125,12 @@ def _tool_call_instruction(
     *,
     labels: Mapping[str, str] | None = None,
 ) -> str:
-    """Render the shared "call ONLY this tool, in schema order" instruction line.
+    """Render the "call ONLY this tool, in schema order" instruction line.
 
-    Echoes the tool description and the parameter order from *schema* so the model
-    fills fields in schema order. When *labels* is given, each param id is annotated
-    with its human heading (e.g. a fragment's injection_label) — used by the
-    feedback step so the model knows what each opaque id means; the director passes
-    none and gets bare ids. Single source for the wording so it can't drift between
-    :func:`build_director_tool_prompt` and :func:`build_feedback_prompt`.
+    Echoes the tool description and parameter order from *schema*. When
+    *labels* is given, each param id is annotated with its human-readable
+    heading (used by the feedback step; the director passes ``None``).
+    Single source for this wording so it can't drift between callers.
     """
     desc = schema["function"]["description"]
     params = schema["function"]["parameters"].get("properties", {})
@@ -150,14 +147,11 @@ def _tool_call_instruction(
 
 
 def build_lorebook_catalog(entries: Sequence[Mapping[str, Any]]) -> str:
-    """Build the Director's lorebook catalog for the agentic-activation path.
+    """Build the Director's lorebook catalog for the agentic activation path.
 
-    Lists each non-``constant`` candidate entry — ``name`` plus its trigger
-    keywords (at most the first 5) — grouped by world. Constant entries are excluded (they are always
-    injected and the Director does not manage them). Deterministic order: worlds
-    in first-appearance order of the already priority/sort-ordered *entries*, and
-    entries within a world in that same order. Returns ``""`` when there are no
-    non-constant candidates (no catalog → no ``selected_lorebook_entries`` arg is offered).
+    Lists each non-``constant`` entry (name + up to 5 keywords), grouped by
+    world. Constant entries are always injected and excluded here. Returns
+    ``""`` when there are no non-constant candidates.
     """
     candidates = [e for e in entries if not e.get("constant")]
     if not candidates:
@@ -254,8 +248,7 @@ REWRITE_PROMPT_PROMPT = 'User\'s message:\n"""[{user_message}]"""'
 def build_rewrite_prompt(user_message: str) -> str:
     """Format :data:`REWRITE_PROMPT_PROMPT` with the raw *user_message*.
 
-    Appended by :func:`build_director_tool_prompt` as the request tail for the
-    ``rewrite_user_prompt`` branch.
+    Used by :func:`build_director_tool_prompt` for the ``rewrite_user_prompt`` branch.
     """
     return REWRITE_PROMPT_PROMPT.format(user_message=user_message)
 
@@ -306,20 +299,15 @@ def build_feedback_prompt(
     reasoning_on: bool = False,
     tool_schema: dict | None = None,
 ) -> str:
-    """Build the trailing *request* message for the post-writer feedback step.
+    """Build the request message for the post-writer feedback step.
 
-    The just-written reply is supplied to the model as its own ``assistant``
-    message (so the feedback step extends the writer/editor KV-cached stack
-    instead of forking off the bare prefix — see :func:`feedback_step`), so it is
-    deliberately NOT quoted here. *tool_schema* is the dynamic ``give_feedback``
-    schema (from :func:`build_feedback_tool`); its parameter order is echoed via
-    the shared :func:`_tool_call_instruction` (as in
-    :func:`build_director_tool_prompt`) so the model fills fields in schema order.
-    Each param id is additionally paired with its injection_label — the same
-    human heading the user sees on the rendered note
-    (chat_inspector.feedbackRows) — so the model knows what each field is for
-    beyond the opaque id. The labels live in the per-turn request only, not the
-    give_feedback schema, so the shared tools-blob KV cache is untouched.
+    The just-written reply is already in the message history as an assistant
+    message, so it is not quoted here. *tool_schema* is the dynamic
+    ``give_feedback`` schema; its parameter order is echoed via
+    :func:`_tool_call_instruction` so the model fills fields in schema order.
+    Each param id is paired with its ``injection_label`` (the heading the user
+    sees) so the model understands what each opaque id means. Labels live in
+    the per-turn request, not the tools blob, so the shared KV cache is untouched.
     """
     preamble = FEEDBACK_PREAMBLE + (REASONING_GUIDANCE if reasoning_on else "")
     parts = [preamble]
@@ -370,12 +358,10 @@ def compute_style_injection_block(
     extra_fields: dict | None = None,
     prior_progressive_state: dict | None = None,
 ) -> str:
-    """Compute the style injection block from director-pass outputs.
+    """Compute the Scene Direction injection block from director pass outputs.
 
-    When *direct_scene_enabled* is False, mood signals are suppressed so the
-    previous turn's director state cannot bleed into the writer. extra_fields
-    are also cleared since all fields (including keywords) now come fresh from
-    the current director pass and are empty when it did not run.
+    When *direct_scene_enabled* is ``False``, mood signals and extra fields are
+    cleared so the previous turn's director state cannot bleed into the writer.
     """
     if extra_fields is None:
         extra_fields = {}
@@ -407,10 +393,10 @@ def build_style_injection(
     extra_fields: dict | None = None,
     prior_progressive_state: dict | None = None,
 ) -> str:
-    """Render the Scene Direction injection block for the writer pass.
+    """Render the Scene Direction block for the writer pass.
 
-    Interactive fragment values are rendered in sort_order, each using the
-    fragment's injection_label.  Arrays are rendered as bullet lists.
+    Interactive fragment values are rendered in ``sort_order`` using each
+    fragment's ``injection_label``. Array fields become bullet lists.
     """
     parts = ["**Scene Direction**"]
 
@@ -445,12 +431,11 @@ def compute_lorebook_injection_block(
     entries: Sequence[Mapping[str, Any]],
     macros: Macros | None = None,
 ) -> str:
-    """Compute the lorebook injection block from active entries.
+    """Build the lorebook block using keyword scanning.
 
-    Constant entries are always included. Other entries are included when
-    one of their keywords appears in the 6 most recent messages (any role).
-
-    Entries are sorted by priority DESC. Returns empty string if no matches.
+    Constant entries are always included. Others are included when a keyword
+    matches within the 6 most recent messages. Sorted by priority DESC.
+    Returns ``""`` when nothing matches.
     """
     if not entries:
         return ""
@@ -463,11 +448,11 @@ def select_keyword_entries(
     entries: Sequence[Mapping[str, Any]],
     scan_depth: int = LOREBOOK_SCAN_DEPTH,
 ) -> list[Mapping[str, Any]]:
-    """Select entries activated by the keyword/substring scan.
+    """Select lorebook entries by keyword/substring scan.
 
-    Constant entries are always selected. Other entries are selected when one of
-    their keywords appears (substring match) in the ``scan_depth`` most recent
-    messages. Returns the matched entries in input order.
+    Constant entries are always selected. Others are selected when any keyword
+    appears (substring match) in the ``scan_depth`` most recent messages.
+    Returns matched entries in input order.
     """
     scan_parts = [m.get("content") or "" for m in messages[-scan_depth:] if m.get("content")]
     scan_text = " ".join(scan_parts)
@@ -502,13 +487,12 @@ def render_lorebook_block(
     entries: Sequence[Mapping[str, Any]],
     macros: Macros | None = None,
 ) -> str:
-    """Render the ``**Lorebook**`` block from already-*selected* entries.
+    """Render already-selected lorebook entries into the ``**Lorebook**`` block.
 
-    Shared by both activation paths — the keyword scan
-    (:func:`compute_lorebook_injection_block`) and the agentic Director
-    (:func:`compute_agentic_lorebook_block`). Entries are sorted by priority
-    DESC; names/content are macro-resolved. Returns ``""`` when *entries* is
-    empty.
+    Shared by the keyword scan (:func:`compute_lorebook_injection_block`) and
+    the agentic director (:func:`compute_agentic_lorebook_block`). Entries
+    are sorted by priority DESC; names and content are macro-resolved.
+    Returns ``""`` when *entries* is empty.
     """
     if not entries:
         return ""
@@ -534,16 +518,13 @@ def compute_agentic_lorebook_block(
     macros: Macros | None = None,
     messages: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
-    """Render the ``**Lorebook**`` block from the Director's agentic selection.
+    """Build the lorebook block from the Director's agentic selection.
 
-    Selects ``constant`` entries (always injected) ∪ entries whose ``name``
-    matches one of *selected_names* (compared case-insensitively, trimmed) ∪
-    entries activated by the keyword/substring scan over the current turn of
-    *messages* (``AGENTIC_LOREBOOK_SCAN_DEPTH``), run in parallel so a keyword
-    the Director overlooks still activates its entry.
-    Duplicate names activate every matching entry; names with no match are
-    ignored. Renders via the shared :func:`render_lorebook_block`. Returns ``""``
-    when nothing is selected.
+    Includes: ``constant`` entries (always injected) + entries whose ``name``
+    matches *selected_names* (case-insensitive, trimmed) + entries triggered by
+    a keyword scan over the current turn (``AGENTIC_LOREBOOK_SCAN_DEPTH``), so
+    keywords the Director overlooks still activate their entries.
+    Renders via :func:`render_lorebook_block`. Returns ``""`` when nothing matches.
     """
     if not entries:
         return ""

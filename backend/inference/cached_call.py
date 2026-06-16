@@ -1,15 +1,10 @@
 """
-cached_call.py — The core cached-call execution path shared by every pass.
+cached_call.py — Shared completion chokepoint for every pipeline pass.
 
-Defines the single completion chokepoint (:func:`cached_complete`) and the
-byte-identical prompt base every pass extends (:class:`CachedBase`). The
-orchestrator and all four passes funnel their LLM calls through here so the
-cache-relevant bytes are computed in exactly one place.
-
-This is the *core* path: it depends on the debug KV-cache tracker
-(``kv_tracker._KVCacheTracker``) only as an optional object passed in by callers,
-never structurally — the reference is type-only (``TYPE_CHECKING``), so the core
-cached-call path has no runtime dependency on the debug tooling.
+Defines :func:`cached_complete` (the single call site all passes funnel
+through) and :class:`CachedBase` (the shared prefix + tools + model bottom
+of the prompt stack). The KV tracker is an optional pass-in; this module has
+no runtime dependency on it.
 """
 
 from __future__ import annotations
@@ -33,22 +28,13 @@ async def cached_complete(
     record: bool = True,
     **params: Any,
 ) -> AsyncIterator[dict]:
-    """Run ``client.complete`` and snapshot the KV-cache view from the *same*
-    arguments it is called with, so the tracker can never drift from what was
-    actually sent to the model.
+    """Run ``client.complete`` and snapshot the KV tracker from the same args.
 
-    This is the single chokepoint every pipeline pass funnels its completions
-    through. ``record()`` (the prompt snapshot) and ``record_usage()`` (provider
-    truth) are bound to the one ``client.complete`` call here, eliminating the
-    old failure mode where a pass recorded one ``messages``/``tools`` blob and
-    then sent a different one.
-
-    ``record=True`` (default) snapshots the prompt before issuing the call, so
-    each call appends one tracker entry. A multi-call loop (the editor's ReAct
-    iterations) therefore shows *every* iteration — surfacing any mid-loop change
-    to the tools blob that would otherwise be invisible. Provider ``usage`` from
-    the terminal ``done`` event is attached to the latest entry for *label*. All
-    events from ``client.complete`` are yielded through unchanged.
+    Every pass funnels through here so the tracker always sees exactly what
+    was sent. ``record=True`` (default) snapshots before the call; each
+    iteration of a multi-call loop (e.g. the editor's ReAct loop) adds its own
+    entry. Provider usage from the terminal ``done`` event is attached to the
+    latest entry for *label*. All events are yielded through unchanged.
     """
     if kv_tracker is not None and record:
         kv_tracker.record(label, messages, tools, model=model)
@@ -66,31 +52,23 @@ async def cached_complete(
 
 @dataclass(frozen=True)
 class CachedBase:
-    """The byte-identical bottom of the prompt stack for one turn on one
-    inference server: the system+history *prefix*, the *tools* blob, and the
-    *model*. Built once per server per turn and shared by every pass that runs
-    on that server, so the cache-relevant bytes are computed in exactly one
-    place and can never be reconstructed — and so silently diverge — per pass.
+    """The shared bottom of the prompt stack for one turn on one server.
 
-    Passes EXTEND this base via :meth:`complete`; they never rebuild it. The
-    fields are frozen and stored as tuples so the shared instance cannot have
-    its prefix or tool list mutated, reordered, or swapped out mid-turn — the
-    failure mode the invariants in docs/architecture/kv-cache.md and
-    tests/unit/test_kv_cache_invariants.py exist to catch.
+    Holds the system+history *prefix*, the *tools* blob, and the *model*.
+    Built once per server per turn; all passes on that server extend it via
+    :meth:`complete` rather than rebuilding it. Fields are frozen tuples so
+    nothing can mutate or reorder the shared base mid-turn.
 
-    In dual-model turns there are two bases: one for the writer's server and one
-    for the agent (director + editor) server. Invariant 5 — "the writer drops
-    tools when it runs on a different server than the agent" — is then just a
-    property of how the writer's base is built (empty ``tools``), not a flag
-    threaded through the writer pass.
+    In dual-model turns there are two bases — one for the writer's server, one
+    for the agent (director + editor) server. The writer's base simply has an
+    empty ``tools`` tuple, which is how Invariant 5 is enforced without
+    threading a flag through the writer pass.
 
-    ``resolve`` is the last step of turning the assembled stack into the literal
-    bytes on the wire: an opaque ``messages -> messages`` transform applied to
-    ``[*prefix, *trailing]`` immediately before the call (in practice
-    ``Macros.resolve_prompt_messages``, scrubbing ``{{user}}``/``{{char}}`` from
-    whatever a pass appended). Keeping it on the base means the tracker snapshot
-    is taken from the *resolved* bytes — the same ones sent — so it cannot drift.
-    ``None`` means send the assembled stack unchanged.
+    ``resolve`` is an optional ``messages -> messages`` transform applied to
+    ``[*prefix, *trailing]`` right before the call (in practice
+    ``Macros.resolve_prompt_messages``, which scrubs ``{{user}}``/``{{char}}``
+    from pass-appended content). The tracker snapshot is taken after resolution,
+    so it always matches what was actually sent. ``None`` means no transform.
     """
 
     prefix: tuple[Mapping[str, Any], ...]
@@ -109,13 +87,11 @@ class CachedBase:
         record: bool = True,
         **params: Any,
     ) -> AsyncIterator[dict]:
-        """Issue one completion that extends this base with *trailing* (the
-        per-pass top of the stack). The cached bottom — prefix + tools + model —
-        comes solely from ``self``; only *trailing* and *tool_choice* vary.
+        """Issue one completion extending this base with *trailing*.
 
-        The assembled stack is run through ``self.resolve`` (if set) to produce
-        the final wire bytes, then handed to :func:`cached_complete` so the
-        tracker snapshot is taken from the exact bytes sent.
+        The cached bottom (prefix + tools + model) comes from ``self``; only
+        *trailing* and *tool_choice* vary per call. The stack is resolved via
+        ``self.resolve`` if set, then handed to :func:`cached_complete`.
         """
         messages: Sequence[Mapping[str, Any]] = [*self.prefix, *trailing]
         if self.resolve is not None:

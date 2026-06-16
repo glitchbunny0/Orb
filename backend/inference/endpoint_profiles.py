@@ -1,20 +1,19 @@
-"""Endpoint/model-matched request translation profiles.
+"""Per-(endpoint, model) request translation profiles.
 
-Some OpenAI-compatible backends reject unknown body fields or demand
-specific value shapes that don't match Orb's defaults. This module defines
-per-(endpoint_url, model) policies that mutate the request body before it
-leaves LLMClient.complete().
+Some OpenAI-compatible backends reject unknown body fields or require
+specific value shapes. This module defines policies that mutate the request
+body before it leaves ``LLMClient.complete()``.
 
-Two-level lookup:
-- Known endpoint + known model -> model-specific profile (replaces default).
-- Known endpoint + unknown/blank model -> endpoint default (None key).
-- Unknown endpoint -> None = pass-through (for local llama.cpp, vLLM, etc.).
+Two-level lookup (PROFILES dict):
+- Known endpoint + known model → model-specific profile (replaces default).
+- Known endpoint + unknown/blank model → endpoint default (``None`` key).
+- Unknown endpoint → ``None`` = pass-through (local llama.cpp, vLLM, etc.).
 
-Adding a new quirk (extensibility gradient):
-  1. Flip an existing typed knob (allow_extra, allow_forced_tool_choice).
-  2. Attach a `custom=` callable to a profile for one-off logic.
-  3. Promote a recurring `custom=` pattern to a named dataclass field.
-  4. Subclass ModelProfile and override apply() for radically different APIs.
+To add a new quirk:
+  1. Flip a typed knob (``allow_extra``, ``allow_forced_tool_choice``).
+  2. Attach a ``custom=`` callable for one-off logic.
+  3. Promote a recurring ``custom=`` pattern to a named dataclass field.
+  4. Subclass ``ModelProfile`` and override ``apply()`` for radically different APIs.
 """
 
 from __future__ import annotations
@@ -30,10 +29,10 @@ Transform = Callable[[dict], Optional[str]]
 
 
 def is_forced_tool_choice(tc: object) -> bool:
-    """True if tool_choice forces a specific call (a dict or "required").
+    """Return ``True`` if *tc* forces a specific tool call (a dict or ``"required"``).
 
-    The single source of truth for "forced" everywhere it's tested: profile
-    coercion here and llm_client's proactive/self-heal coercion.
+    Single source of truth for "forced" — used by profile coercion and the
+    client's self-heal path.
     """
     return isinstance(tc, dict) or tc == "required"
 
@@ -42,8 +41,8 @@ def is_forced_tool_choice(tc: object) -> bool:
 class ModelProfile:
     """Per-(endpoint, model) request translation policy.
 
-    Typed knobs cover the common cases; `custom` is the escape hatch for
-    bespoke transforms that don't yet warrant a named field.
+    Typed knobs cover the common cases; ``custom`` is the escape hatch for
+    one-off transforms that don't yet warrant a named field.
     """
 
     # Extra body keys allowed past ALWAYS_ALLOWED. Anything else is dropped.
@@ -61,7 +60,7 @@ class ModelProfile:
     custom: tuple[Transform, ...] = field(default_factory=tuple)
 
     def apply(self, body: dict) -> list[str]:
-        """Mutate body in place. Return human-readable actions for logging."""
+        """Apply this profile to *body* in place. Returns log lines for each mutation."""
         actions: list[str] = []
 
         if self.allow_extra is not None:
@@ -113,11 +112,12 @@ _DEEPSEEK_REASONER_EXTRA: frozenset[str] = _DEEPSEEK_DEFAULT_EXTRA - {
 
 
 def _deepseek_coerce_tool_choice_when_thinking(body: dict) -> Optional[str]:
-    """Any DeepSeek request with thinking enabled is routed through reasoner
-    semantics, which reject forced-function tool_choice and "required" -- the
-    API echoes back "deepseek-reasoner does not support this tool_choice"
-    even when model=deepseek-chat. Coerce to "auto" so the graceful-skip
-    paths in Director/Editor handle any unselected tool calls.
+    """Coerce forced ``tool_choice`` to ``"auto"`` when thinking is enabled.
+
+    DeepSeek routes any thinking-on request through reasoner semantics, which
+    reject forced-function ``tool_choice`` (and ``"required"``) even when
+    ``model=deepseek-chat``. Coercing to ``"auto"`` lets the director/editor
+    graceful-skip paths handle any unselected tool calls.
     """
     thinking = body.get("thinking")
     if not isinstance(thinking, dict) or thinking.get("type") != "enabled":
@@ -168,11 +168,10 @@ PROFILES: dict[str, dict[Optional[str], ModelProfile]] = {
 
 
 def profile_for(endpoint_url: str, model: str = "") -> Optional[ModelProfile]:
-    """Resolve (endpoint_url, model) to a ModelProfile, or None for pass-through.
+    """Resolve (endpoint_url, model) to a ``ModelProfile``, or ``None`` for pass-through.
 
-    A blank `model` falls through to the endpoint default. An unmatched URL
-    returns None -- the body is then sent unchanged (current behavior for
-    local / unknown backends).
+    A blank *model* falls through to the endpoint default. An unmatched URL
+    returns ``None`` — the body is sent unchanged (local / unknown backends).
     """
     if not endpoint_url:
         return None
@@ -207,11 +206,11 @@ def _is_openrouter(endpoint_url: str) -> bool:
 
 
 def _is_tool_choice_unsupported(status: int, text: str) -> bool:
-    """True for OpenRouter's tool_choice rejection: a 404 reading
-    "No endpoints found that support the provided 'tool_choice' value."
-    The provider routed for this model honors no tool_choice value at all
-    (not just forced ones), so the recovery is to drop the param entirely.
-    Narrow on purpose so genuine 404s (bad model id, etc.) don't match.
+    """Return ``True`` for OpenRouter's ``tool_choice``-unsupported 404.
+
+    Matches "No endpoints found that support the provided 'tool_choice'
+    value." — meaning the routed provider rejects all ``tool_choice`` values.
+    Kept narrow so genuine 404s (bad model id, etc.) don't match.
     """
     if status != 404:
         return False
@@ -220,9 +219,9 @@ def _is_tool_choice_unsupported(status: int, text: str) -> bool:
 
 
 def prepare_request_body(endpoint_url: str, model: str, body: dict) -> list[str]:
-    """Apply the matching profile plus any session-learned workarounds to
-    `body` in place, before it is sent. Returns human-readable log lines for
-    each mutation (empty list if the body is sent unchanged).
+    """Apply the matching profile and any session-learned workarounds to *body* in place.
+
+    Returns log lines for each mutation (empty list if the body is unchanged).
     """
     actions: list[str] = []
 
@@ -240,15 +239,14 @@ def prepare_request_body(endpoint_url: str, model: str, body: dict) -> list[str]
 
 
 def recover_from_error(endpoint_url: str, model: str, body: dict, status: int, text: str) -> Optional[str]:
-    """Inspect a >=400 response. If a recognised provider quirk explains it,
-    mutate `body` in place to work around it, remember the quirk for the
-    session, and return a log line describing the retry. Return None to let
-    the caller propagate the error (no retry).
+    """Handle a >=400 response. If a known provider quirk explains it, mutate
+    *body* in place, record the quirk for the session, and return a log line
+    (triggering one retry). Returns ``None`` to propagate the error.
 
-    The one quirk handled today: an OpenRouter model whose routed provider
-    rejects the tool_choice param (value-agnostic). Recovery is to drop the
-    param and retry once; the 404 lands before any SSE event, so the retry is
-    clean. List such models in PROFILES['openrouter.ai'] for a zero-retry fix.
+    Currently handles one quirk: an OpenRouter model whose routed provider
+    rejects ``tool_choice`` entirely. Recovery is to drop the param and retry;
+    the 404 lands before any SSE event so the retry is clean. Add such models
+    to ``PROFILES['openrouter.ai']`` for a zero-retry fix.
     """
     if not _is_openrouter(endpoint_url):
         return None

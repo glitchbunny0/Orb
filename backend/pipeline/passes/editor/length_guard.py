@@ -1,17 +1,16 @@
 """
-passes/editor/length_guard.py — The length-guard feature, in one place.
+passes/editor/length_guard.py — The length-guard feature.
 
-Length guard caps response length in two arms:
+Caps response length in two arms:
 
-* *Preventive* (writer): :func:`writer_nudge` appends a one-line "keep it under
-  N words" instruction to the writer's user message, only in enforce mode.
+* *Preventive* (writer): :func:`writer_nudge` appends a "keep it under N words"
+  instruction to the writer's user message, only in enforce mode.
 * *Corrective* (editor): :func:`evaluate_length_guard` checks the finished draft
-  and, when it overshoots, hands the editor a directive to call ``editor_rewrite``.
+  and, when it overshoots, gives the editor a directive to call ``editor_rewrite``.
 
-:func:`resolve_length_guard` turns raw settings into the :class:`LengthGuard`
-config the orchestrator threads to both passes; a non-None result *is* the on/off
-state. :func:`apply_length_guard_tools` carries the one cross-cutting requirement:
-the feature needs the ``editor_rewrite`` tool present in every pass's schema blob.
+:func:`resolve_length_guard` converts raw settings into the :class:`LengthGuard`
+config; a non-None result means the guard is enabled. :func:`apply_length_guard_tools`
+ensures ``editor_rewrite`` is present in every pass's tool blob.
 """
 
 from __future__ import annotations
@@ -20,13 +19,11 @@ from typing import Any, Mapping, TypedDict
 
 
 class LengthGuard(TypedDict):
-    """Resolved length-guard limits threaded through the pipeline.
+    """Resolved length-guard config threaded through the pipeline.
 
-    Built by :func:`resolve_length_guard` only when the guard is enabled, so its
-    mere presence *is* the on/off state — ``None`` means disabled, and any
-    non-None value means enabled. Consumed by the writer (preventive nudge, only
-    when ``enforce``) and the editor (corrective rewrite). ``enforce`` carries the
-    enforce-mode flag so it travels with the limits instead of as a sidecar.
+    Built only when the guard is enabled, so a non-None value means enabled and
+    ``None`` means disabled. The writer uses it for the preventive nudge (only
+    when ``enforce`` is True); the editor uses it for the corrective rewrite.
     """
 
     enforce: bool
@@ -47,10 +44,8 @@ LENGTH_GUARD_INSTRUCTIONS = (
 def resolve_length_guard(settings: Mapping[str, Any], agent_on: bool) -> LengthGuard | None:
     """Resolve the length-guard config from *settings*, or ``None`` when disabled.
 
-    Agent-gated: the guard is one of the agent-dependent features, so it is off
-    whenever the agent is off (see ``agent_enabled``). The dict is built *only*
-    when enabled, so its presence is the on/off state downstream —
-    ``cfg.length_guard is not None`` means enabled.
+    Agent-gated: returns ``None`` when the agent is off. The returned dict is the
+    on/off state downstream — ``cfg.length_guard is not None`` means enabled.
     """
     if not agent_on or not bool(settings.get("length_guard_enabled", 0)):
         return None
@@ -62,13 +57,10 @@ def resolve_length_guard(settings: Mapping[str, Any], agent_on: bool) -> LengthG
 
 
 def apply_length_guard_tools(enabled_tools: Mapping[str, bool], length_guard: LengthGuard | None) -> Mapping[str, bool]:
-    """Mirror the ``editor_rewrite`` tool into *enabled_tools* when the guard is on.
+    """Add ``editor_rewrite`` to *enabled_tools* when the length guard is on.
 
-    The length-guard *feature* requires the ``editor_rewrite`` *tool*: enabling it
-    here means ``enabled_schemas()`` includes its schema in all three passes — the
-    same KV-cache approach as ``editor_apply_patch``. ``editor_rewrite`` is
-    internal (not user-toggleable); this is its only enable path. Returns
-    *enabled_tools* unchanged when the guard is off.
+    This is the only path that enables ``editor_rewrite`` (it is internal, not
+    user-toggleable). Returns *enabled_tools* unchanged when the guard is off.
     """
     if length_guard is None:
         return enabled_tools
@@ -76,11 +68,10 @@ def apply_length_guard_tools(enabled_tools: Mapping[str, bool], length_guard: Le
 
 
 def writer_nudge(length_guard: LengthGuard | None) -> str:
-    """Preventive arm: the writer instruction to self-limit, or ``""``.
+    """Return the writer's self-limiting instruction, or ``""`` when not in enforce mode.
 
-    Fires only in enforce mode (``length_guard["enforce"]``); a non-None
-    *length_guard* already means the feature is enabled. The returned text is
-    appended to the writer's user-message tail.
+    A non-None *length_guard* already means the guard is enabled; this fires only
+    when ``enforce`` is also True.
     """
     if not length_guard or not length_guard["enforce"]:
         return ""
@@ -90,12 +81,12 @@ def writer_nudge(length_guard: LengthGuard | None) -> str:
 
 
 def evaluate_length_guard(draft: str, length_guard: LengthGuard | None) -> tuple[bool, str, int]:
-    """Corrective arm: decide whether *draft* overshoots its word budget.
+    """Return whether *draft* overshoots its word budget.
 
     Returns ``(triggered, instruction, word_count)``. When triggered,
-    *instruction* is the formatted :data:`LENGTH_GUARD_INSTRUCTIONS` directive the
-    editor feeds the model (alongside forcing ``editor_rewrite`` via tool_choice).
-    A ``None`` guard or an in-budget draft yields ``(False, "", word_count)``.
+    *instruction* is the formatted directive the editor passes to the model
+    (``editor_rewrite`` is forced via ``tool_choice``). A ``None`` guard or an
+    in-budget draft yields ``(False, "", word_count)``.
     """
     if length_guard is None:
         return False, "", 0

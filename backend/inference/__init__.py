@@ -1,12 +1,8 @@
-"""Inference layer — LLM transport + prompt/tool assembly (ports & adapters).
+"""Inference layer — LLM transport and prompt/tool assembly.
 
-Depends only on ``core``. Sits below ``workflows`` and ``pipeline`` in the
-one-way dependency order. Internal near-flat cluster: ``client`` → ``endpoint_profiles``,
-``cached_call`` → ``kv_tracker``, ``prompt_builder`` → ``tool_registry`` + ``core``.
-
-The facade re-exports the public surface so callers write ``from .inference import X``.
-Private submodule symbols (``_serialize_messages``, ``_is_tool_choice_unsupported``,
-…) are reached via the canonical submodule path, not this facade.
+Depends only on ``core``. Facade re-exports the public surface so callers
+write ``from .inference import X``. Private symbols are accessed via the
+submodule path directly.
 """
 
 from __future__ import annotations

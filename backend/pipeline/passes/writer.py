@@ -1,5 +1,5 @@
 """
-passes/writer.py — Writer pass: the main phase that streams the story response.
+passes/writer.py — The writer pass: streams the main story response.
 """
 
 from __future__ import annotations
@@ -34,11 +34,10 @@ def build_writer_content(
 ) -> "str | list[ContentPart]":
     """Build the writer's user-message content (string or multimodal list).
 
-    Built once by the orchestrator and threaded into both the writer pass and
-    the editor, which replays it verbatim to reuse the writer's KV-cached prefix.
-    The length-guard nudge is the *preventive* arm: it fires only in enforce mode
-    (``length_guard["enforce"]``); a non-None ``length_guard`` already means the
-    feature is enabled.
+    Built once and threaded into both the writer pass and the editor, which
+    replays it verbatim to extend the writer's KV-cached prefix. The length-guard
+    nudge (preventive arm) fires only in enforce mode; a non-None *length_guard*
+    already means the feature is enabled.
     """
     tail = ""
     if lorebook_block:
@@ -62,11 +61,11 @@ async def writer_pass(
     kv_tracker=None,
     reasoning_on: bool = True,
 ) -> AsyncIterator[dict]:
-    """Yields {"type": "content"|"reasoning", "delta": str} dicts.
+    """Yield ``{"type": "content"|"reasoning", "delta": str}`` dicts.
 
-    *content* is the writer's user-message body, prebuilt by the orchestrator via
-    ``build_writer_content`` (and shared with the editor). The tool *schema* blob
-    comes from ``base`` so it stays byte-identical with the director/editor passes.
+    *content* is the writer's user-message body, prebuilt by
+    ``build_writer_content`` and shared with the editor. The tool blob comes from
+    *base* so it stays byte-identical with the director and editor passes.
     """
     trailing: list[ChatMessage] = [{"role": "user", "content": content}]
 
@@ -101,15 +100,12 @@ async def writer_stage(
     attachments: Sequence[Mapping[str, Any]],
     kv_tracker: _KVCacheTracker,
 ) -> AsyncIterator[dict]:
-    """Writer stage: input-prep + writer pass + event translation, owned here so
-    the orchestrator sequences passes rather than threading writer internals.
+    """Input-prep + writer pass + event translation.
 
-    Builds ``state.writer_content`` once (threaded into the writer pass and later
-    replayed verbatim by the editor to extend the writer's KV-cached prefix),
-    runs :func:`writer_pass` translating ``content``→``token`` /
-    ``reasoning``→``reasoning`` SSE events, and folds the writer's wall time into
-    ``state.latency``. The writer pass only streams tokens and reports no
-    duration of its own, so the timing is taken here.
+    Builds ``state.writer_content`` once (replayed verbatim by the editor to
+    extend the writer's KV-cached prefix), runs :func:`writer_pass` translating
+    ``content``→``token`` and ``reasoning``→``reasoning`` events, and accumulates
+    the writer's wall time into ``state.latency``.
     """
     state.writer_content = build_writer_content(
         state.writer_lorebook_block,

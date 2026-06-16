@@ -1,18 +1,15 @@
 """
-persistence.py — Outbound turn persistence: consume the stream, save results.
+persistence.py — Saves the turn output after the pipeline finishes.
 
-:func:`_consume_pipeline` drains the pipeline's SSE events, passing public ones
-through to the caller and, when the terminal ``_result`` event arrives, writing
-the assistant message and every turn side-effect (director state, workflow
-attachments + per-message state, active-leaf advance, the lifetime char
-counter, the ``conversation_logs`` row). The ``_persist_*`` / ``_fallback_*`` /
-``_shielded_*`` helpers split the happy path from the best-effort save used when
-a turn is aborted before ``_result`` fires, with ``asyncio.shield`` guarding the
-finally-block writes against request-task cancellation.
+:func:`_consume_pipeline` drains the pipeline's SSE events, passes public ones
+through to the caller, and on the terminal ``_result`` event writes the assistant
+message and all turn side-effects (director state, workflow attachments,
+per-message state, active-leaf advance, lifetime char counter, conversation log).
 
-Reads ``agent_enabled`` from ``predicates`` (no pass-module coupling) and
-rehydrates the terminal ``_result`` event into a ``TurnState`` (the same object
-the passes built) from ``state``.
+The ``_persist_*`` / ``_fallback_*`` / ``_shielded_*`` helpers separate the happy
+path from the best-effort save triggered when a turn is aborted before
+``_result`` fires, with ``asyncio.shield`` protecting the finally-block writes
+from request-task cancellation.
 """
 
 from __future__ import annotations
@@ -30,12 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 def _conversation_log_writer(conversation_id: str, log_turn_index: int):
-    """Return an async callback that writes the turn's ``conversation_logs`` row.
+    """Return an async callback that writes the ``conversation_logs`` row for this turn.
 
-    The callback is passed as ``extra_on_result`` to :func:`_consume_pipeline`
-    and runs right after the assistant message is persisted. Fresh turns log at
-    the user turn index; branch-creating paths (fork-edit, regenerate) log at
-    the assistant turn index so branches stay distinguishable in the log.
+    The callback runs right after the assistant message is saved. Normal turns
+    log at the user turn index; branch-creating paths (fork-edit, regenerate)
+    log at the assistant turn index so their log rows stay distinguishable.
     """
 
     async def _on_result(res: TurnState, asst_id):
@@ -61,8 +57,7 @@ def _conversation_log_writer(conversation_id: str, log_turn_index: int):
 async def _persist_rewrite(res: TurnState, user_msg_id: int | None) -> None:
     """Overwrite the stored user message with the director's rewrite, if any.
 
-    No-op when the director did not rewrite the message. Shared by both the
-    normal and fallback persistence paths so the logic lives in one place.
+    No-op when no rewrite happened. Shared by the normal and fallback paths.
     """
     if res.rewritten_msg and user_msg_id:
         await db.update_message_content(user_msg_id, res.effective_msg)
@@ -75,17 +70,15 @@ async def _persist_result(
     user_msg_id: int | None,
     turn_index: int,
 ) -> tuple[int | None, list[dict]]:
-    """Persist the assistant message and all turn side-effects after ``_result`` fires.
+    """Save the assistant message and all turn side-effects after ``_result`` fires.
 
-    Updates director state, saves the assistant message row with any workflow
+    Updates director state, saves the assistant message with any workflow
     attachments, writes per-message workflow state, advances the active leaf,
     and increments the lifetime character counter.
 
     Returns ``(asst_id, rejected_workflow_atts)``. ``rejected_workflow_atts``
     is non-empty when the attachment cache dropped entries that lacked the
     metadata needed for re-synthesis.
-
-    Called by :func:`_consume_pipeline`.
     """
     if agent_enabled(settings):
         await db.update_director_state(
@@ -146,13 +139,11 @@ async def _fallback_persist(
     turn_index: int,
     accumulated_text: str,
 ):
-    """Best-effort save for a turn that was aborted before ``_result`` fired.
+    """Best-effort save for a turn aborted before ``_result`` fired.
 
     Saves whatever the writer streamed (``accumulated_text``) if non-empty.
     Reasoning-only output does not create a message node. Errors are swallowed
-    so a save failure does not propagate to the caller.
-
-    Called from the ``finally`` block of :func:`_consume_pipeline`.
+    so a save failure never propagates to the caller.
     """
     try:
         if res.active_moods and agent_enabled(settings):
@@ -191,8 +182,7 @@ async def _shielded_fallback(
 ):
     """Run :func:`_fallback_persist` under ``asyncio.shield``, retrying once on cancellation.
 
-    Ensures partial output is saved even when the surrounding request task is
-    cancelled mid-write. Called from the ``finally`` block of :func:`_consume_pipeline`.
+    Ensures partial output is saved even when the request task is cancelled mid-write.
     """
     try:
         await asyncio.shield(
@@ -222,13 +212,10 @@ async def _shielded_fallback(
 async def _shielded_log_save(extra_on_result, res: TurnState, asst_id: int | None):
     """Run the ``extra_on_result`` callback exactly once under ``asyncio.shield``.
 
-    The callback writes a ``conversation_logs`` row, which is a bare INSERT
-    with no dedup guard. Unlike :func:`_shielded_fallback`, cancellation is
-    not retried — a partial write has already committed the row once, and
-    re-running it would create a duplicate. Non-cancel errors are swallowed
+    The callback writes a ``conversation_logs`` row (a bare INSERT with no dedup
+    guard). Cancellation is not retried — a partial write already committed the
+    row, and re-running would create a duplicate. Non-cancel errors are swallowed
     so a log failure never crashes the turn.
-
-    Called from the ``finally`` block of :func:`_consume_pipeline`.
     """
 
     async def _run():
@@ -251,17 +238,15 @@ async def _consume_pipeline(
     *,
     extra_on_result=None,
 ) -> AsyncIterator[dict]:
-    """Drain the pipeline's SSE events, persist results, and emit ``done``.
+    """Drain the pipeline's SSE events, save results, and emit ``done``.
 
-    Passes ``token`` and all other public events straight to the caller.
-    When the ``_result`` event arrives, persists the assistant message and
-    calls the optional *extra_on_result* callback ``(res, asst_id) -> None``
-    (used by every entry point to write the conversation log).
+    Passes ``token`` and all other public events straight to the caller. When
+    the ``_result`` event arrives, saves the assistant message and calls the
+    optional *extra_on_result* callback ``(res, asst_id) -> None`` (used to
+    write the conversation log).
 
     Falls back to partial persistence in the ``finally`` block if the pipeline
     exits before ``_result`` fires (abort or error).
-
-    Called by ``entrypoints._generate_reply``.
     """
     res = TurnState()
     asst_id = None

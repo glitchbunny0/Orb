@@ -1,21 +1,18 @@
 """
-entrypoints.py — Public turn entry points + the shared turn driver.
+entrypoints.py — The five public turn handlers and the shared turn driver.
 
-The top integrator of the pipeline package — the pipeline-internal mirror of how
-``api/`` is the only backend layer that wires everything: it pulls inbound load /
-setup from ``context``, the pass coordinator from ``orchestrator``, and outbound
-saves from ``persistence``, and exposes the five HTTP-facing handlers.
+Wires together context loading, the pass orchestrator, and persistence:
 
 * :func:`handle_turn` / :func:`handle_fork_edit` / :func:`handle_regenerate` /
-  :func:`handle_super_regenerate` — arrange history + turn indices, persist the
-  user row, then delegate to :func:`_generate_reply` (setup → pipeline →
+  :func:`handle_super_regenerate` — arrange history and turn indices, persist
+  the user row, then delegate to :func:`_generate_reply` (setup → pipeline →
   persist).
-* :func:`handle_magic_rewrite` — the outlier: a single writer-style call (no
-  director/editor) reusing the writer lane so the KV cache stays warm.
+* :func:`handle_magic_rewrite` — the outlier: a single writer-style call with
+  no director or editor, reusing the writer lane so the KV cache stays warm.
 
-``_resolve_target_and_parent`` / ``_prepare_regen_context`` are the shared
-regenerate-family helpers (resolve the target message, rebuild branch history,
-reset the director to the branch baseline).
+``_resolve_target_and_parent`` and ``_prepare_regen_context`` are shared helpers
+for the regenerate family: load the target message, rebuild branch history, and
+reset the director to the branch baseline.
 """
 
 from __future__ import annotations
@@ -56,8 +53,6 @@ async def _resolve_target_and_parent(
     Returns ``(target, user_msg)`` on success, or an error string if the
     message is missing, belongs to a different conversation, or is not an
     assistant message.
-
-    Called by all regenerate-style entry points.
     """
     target = await db.get_message_by_id(assistant_msg_id)
     if not target or target["conversation_id"] != conversation_id or target["role"] != "assistant":
@@ -75,13 +70,11 @@ async def _prepare_regen_context(
     target: Mapping[str, Any],
     user_msg: Mapping[str, Any],
 ) -> tuple[Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]]:
-    """Load history and attachments for a regeneration pass.
+    """Load history and attachments for a regeneration, and reset the director.
 
-    Also resets the director's active moods and progressive fields to the
-    pre-turn baseline so the regenerated reply starts from the same state
-    as the original. Returns ``(history, attachments)``.
-
-    Called by :func:`handle_regenerate` and :func:`handle_super_regenerate`.
+    Resets the director's active moods and progressive fields to the pre-turn
+    baseline so the regenerated reply starts from the same state as the original.
+    Returns ``(history, attachments)``.
     """
     parent_id: int | None = user_msg.get("parent_id")
     history = await db.get_path_to_leaf(conversation_id, parent_id) if parent_id is not None else []
@@ -110,20 +103,16 @@ async def _generate_reply(
     editor_audit_msgs: list[str] | None = None,
     consume_settings: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[dict]:
-    """Run the full turn (setup → pipeline → persist) and stream all SSE events.
+    """Run setup → pipeline → persist and stream all SSE events.
 
     The user message row must already be persisted before this is called.
-    Calls ``context._prepare_turn``, ``orchestrator._run_pipeline``, and
-    ``persistence._consume_pipeline`` in sequence.
 
     *pipeline_settings* drives the passes; *consume_settings* (defaults to the
-    same) controls what settings are used during persistence — they differ only
-    for super-regenerate, which passes a rewrite-disabled copy to the pipeline
-    but persists under the original settings. *user_message* is what the writer
-    actually receives, which may differ from *last_user_message* (e.g.
-    super-regenerate uses an OOC steering message as the writer input).
-
-    Called by every public entry point that generates a reply.
+    same) is used during persistence — they differ only for super-regenerate,
+    which passes a rewrite-disabled copy to the pipeline but persists under the
+    original settings. *user_message* is what the writer actually receives; it
+    may differ from *last_user_message* (super-regenerate sends an OOC steering
+    message as the writer input while *last_user_message* carries the original).
     """
     setup: _TurnSetup | None = None
     async for ev in _prepare_turn(
@@ -191,15 +180,14 @@ async def handle_turn(
     attachments: Optional[List[dict]] = None,
     abort_token: AbortToken | None = None,
 ) -> AsyncIterator[dict]:
-    """Handle a new user message: save it, run the pipeline, stream the reply.
+    """Save the user message, run the pipeline, and stream the reply.
 
-    The main entry point for ``POST /conversations/{cid}/send`` and
-    ``POST /conversations/{cid}/continue``. For ``/continue``
-    (``skip_user_persist=True``) the user row already exists as the last
-    message; the pipeline runs from there without creating a duplicate row.
+    Entry point for ``POST /send`` and ``POST /continue``. For ``/continue``
+    (``skip_user_persist=True``) the user row already exists; the pipeline runs
+    from there without creating a duplicate.
 
-    Streams SSE events: ``user_message_created``, then all pipeline events
-    (``director_done``, ``token``, ``editor_done``, etc.), and finally ``done``.
+    Streams: ``user_message_created``, then pipeline events (``director_done``,
+    ``token``, ``editor_done``, etc.), and finally ``done``.
     """
     try:
         if attachments is None:
@@ -280,16 +268,15 @@ async def handle_fork_edit(
     new_content: str,
     abort_token: AbortToken | None = None,
 ) -> AsyncIterator[dict]:
-    """Fork the conversation at a user message: save an edited sibling and generate a fresh reply.
+    """Fork the conversation at a user message: save the edit and generate a fresh reply.
 
-    Entry point for ``POST /messages/{id}/fork-edit``. Persists the edited text
-    as a new sibling of *user_msg_id* (same parent and turn index), resets the
-    director to the branch point, then runs the full pipeline to produce a new
-    reply. The original message and its subtree are left intact; branch
-    navigation then shows both versions.
+    Entry point for ``POST /messages/{id}/fork-edit``. Saves the edited text as a
+    new sibling of *user_msg_id* (same parent and turn index), resets the director
+    to the branch point, then runs the full pipeline. The original message and its
+    subtree are left intact; branch navigation shows both.
 
     Logs at the assistant turn (not the user turn) so this branch's log row is
-    distinct from the original turn's log at the user turn.
+    distinct from the original turn's log.
     """
     try:
         ctx = await _load_pipeline_context(conversation_id, abort_token=abort_token)
@@ -352,12 +339,12 @@ async def handle_regenerate(
     assistant_msg_id: int,
     abort_token: AbortToken | None = None,
 ) -> AsyncIterator[dict]:
-    """Regenerate an existing assistant message as a new sibling branch.
+    """Regenerate an assistant message as a new sibling branch.
 
     Entry point for ``POST /messages/{id}/regenerate``. Resets the director to
-    the pre-turn baseline and re-runs the full pipeline from the parent user
-    message, producing a new reply at the same turn index. The original message
-    is kept; branch navigation shows both.
+    the pre-turn baseline and re-runs the pipeline from the parent user message,
+    producing a new reply at the same turn index. The original is kept; branch
+    navigation shows both.
     """
     try:
         ctx = await _load_pipeline_context(conversation_id, abort_token=abort_token)
@@ -406,13 +393,13 @@ async def handle_super_regenerate(
     assistant_msg_id: int,
     abort_token: AbortToken | None = None,
 ) -> AsyncIterator[dict]:
-    """Regenerate a reply with the original exchange kept as context (super-regenerate).
+    """Regenerate a reply with the original exchange visible as context.
 
     Entry point for ``POST /messages/{id}/super_regenerate``. Extends history to
-    include the original user + assistant exchange so the model sees what it
-    previously wrote, then sends an OOC steering message asking for a different
-    direction. The rewrite tool is disabled to prevent the director from altering
-    that steering message. The result is saved as a new sibling branch.
+    include the original exchange so the model sees what it previously wrote, then
+    sends an OOC steering message asking for a different direction. The prompt-
+    rewrite tool is disabled so the director can't alter that steering message.
+    The result is saved as a new sibling branch.
     """
     try:
         ctx = await _load_pipeline_context(conversation_id, abort_token=abort_token)
@@ -475,11 +462,10 @@ async def handle_magic_rewrite(
     """Rewrite an assistant message in place following a user-supplied direction.
 
     Entry point for ``POST /messages/{id}/magic_rewrite``. Appends the original
-    exchange to history, then runs a single writer-style LLM call (no director
-    or editor passes) with an OOC instruction built from *direction*. Uses the
-    same writer lane and tool blob as a normal turn so the LLM's KV cache is
-    reused. On success, overwrites the stored message content; on abort, the
-    original is left unchanged.
+    exchange to history, then runs a single writer-style call (no director or
+    editor) with an OOC instruction built from *direction*. Uses the same writer
+    lane and tool blob as a normal turn so the KV cache is reused. On success
+    the stored message is overwritten; on abort the original is left unchanged.
     """
     try:
         ctx = await _load_pipeline_context(conversation_id, abort_token=abort_token)

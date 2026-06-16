@@ -14,12 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 class AbortToken:
-    """A single stop signal shared by every LLMClient in one turn.
+    """Shared stop signal for all clients in one turn.
 
-    A turn may spin up several physical clients (writer, separate agent, and
-    their macro-resolving wrappers). They all hold a reference to the same
-    token, so ``abort()`` is signalled once and ``is_aborted`` reads the same
-    state everywhere — no per-client fan-out, no list bookkeeping.
+    All clients in a turn hold the same token, so calling ``abort()`` once
+    stops every ongoing completion — no per-client fan-out needed.
     """
 
     def __init__(self) -> None:
@@ -37,11 +35,10 @@ class AbortToken:
 
 
 def reasoning_cfg(on: bool) -> dict:
-    """Complete reasoning params for a client.complete() call, spread with **.
+    """Reasoning params dict to spread into a ``client.complete()`` call.
 
-    Covers all API standards in one place:
-      - reasoning.effort / reasoning.enabled  — OpenAI-style servers
-      - chat_template_kwargs.enable_thinking  — llama.cpp servers
+    Covers all known API styles in one place (OpenAI-style, llama.cpp,
+    Anthropic thinking).
     """
     return (
         {
@@ -74,7 +71,7 @@ class LLMClient:
         self.abort_token = abort_token or AbortToken()
 
     def abort(self) -> None:
-        """Signal all ongoing complete() calls to stop and close their connections."""
+        """Stop all ongoing completions and close their connections."""
         self.abort_token.abort()
 
     @property
@@ -97,14 +94,14 @@ class LLMClient:
         tool_choice: dict | str | None = None,
         **params,
     ) -> AsyncIterator[dict]:
-        """Streaming completion. Yields reasoning deltas then the assembled message.
+        """Stream a chat completion. Yields deltas then a final assembled message.
 
         Yields:
-            {"type": "reasoning", "delta": str}  — zero or more reasoning chunks
-            {"type": "content",   "delta": str}  — zero or more content chunks
-            {"type": "done", "message": dict, "usage": dict | None}
-                — assembled message with content/tool_calls, plus the provider's
-                  usage object if returned (None when the server doesn't emit it).
+            ``{"type": "reasoning", "delta": str}`` — zero or more reasoning chunks
+            ``{"type": "content",   "delta": str}`` — zero or more content chunks
+            ``{"type": "done", "message": dict, "usage": dict | None}``
+                — assembled message (content and/or tool_calls) and the
+                  provider usage object (``None`` when the server omits it).
         """
         body = {
             "model": model,
@@ -306,7 +303,7 @@ class LLMClient:
 
 
 def _sanitize_args(obj):
-    """Recursively strip tokenizer-artifact quote tokens (e.g. <|"|) from string values."""
+    """Recursively strip tokenizer-artifact quote tokens (``<|"|``) from string values."""
     if isinstance(obj, str):
         return obj.replace('<|"|', "").replace('<|"|', "")
     if isinstance(obj, list):
@@ -317,7 +314,7 @@ def _sanitize_args(obj):
 
 
 def _make_tool_call(name: str, arguments) -> dict:
-    """Build a normalised tool-call dict, parsing arguments if they arrive as a JSON string."""
+    """Build a normalised tool call dict, JSON-decoding ``arguments`` if it's a string."""
     if isinstance(arguments, str):
         try:
             arguments = json.loads(arguments)
@@ -329,9 +326,9 @@ def _make_tool_call(name: str, arguments) -> dict:
 def parse_tool_calls(message: dict) -> list[dict]:
     """Extract tool calls from a completion message.
 
-    Handles both the standard `tool_calls` array and a fallback where the
-    model outputs JSON in the content body (common with some local servers).
-    Also handles Gemma-style <tool_call>...</tool_call> tags.
+    Tries, in order: the standard ``tool_calls`` array, Gemma-style
+    ``<tool_call>...</tool_call>`` tags, then JSON embedded in the content
+    body (common with some local servers).
     """
     tool_calls = []
 

@@ -1,25 +1,19 @@
 """
 passes/editor/feedback.py — Feedback step of the editor pass.
 
-A post-writer phase that produces an out-of-character note for the *user* (not
-the writer). It runs at the end of the editor pass, reads the final (edited)
-reply, and calls ``give_feedback`` with the enabled ``field_type='feedback'``
-interactive fragments as its parameters.
+Runs at the end of the editor pass and produces an out-of-character note for the
+user (not the writer). Calls ``give_feedback`` with the enabled
+``field_type='feedback'`` interactive fragments as parameters.
 
-This inverts the Interactive Fragment direction: where ``direct_scene`` steers
-the writer (AI->AI), ``give_feedback`` surfaces a note to the player (AI->user).
-Like ``direct_scene``, the ``give_feedback`` schema rides the shared per-turn
-tools blob (registered in ``tool_registry.TOOLS``, built once by the orchestrator and
-threaded to every pass via ``schema_overrides``). This step therefore reuses the
-unchanged shared base and merely forces ``tool_choice=give_feedback``, so it adds
-zero cache miss on the prefix+tools region — no blob swap, nothing to restore.
+This inverts the Interactive Fragment direction: ``direct_scene`` steers the
+writer (AI→AI), while ``give_feedback`` surfaces a note to the player (AI→user).
 
-For the same reason it must not fork the *message* stack either: it replays the
-writer's exact user message and the reply as a real assistant turn (mirroring the
-editor in ``editor.py``) so the call extends the warm writer/editor prefix rather
-than appending a single fresh message after ``base.prefix``. The latter collapsed
-the provider cache to just the system+tools block — the message-side half of the
-feedback cache bust, the counterpart to the tools-blob fix.
+The ``give_feedback`` schema rides the shared per-turn tool blob, so this step
+reuses the unchanged base and only forces ``tool_choice=give_feedback``. It also
+replays the writer's exact user message and reply (mirroring the editor) so the
+call extends the warm writer/editor KV-cached prefix rather than forking off the
+bare ``base.prefix`` — the latter would collapse the cache hit to just the
+system+tools block.
 """
 
 from __future__ import annotations
@@ -45,11 +39,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FeedbackResult:
-    """Typed payload of the feedback step's terminal ``done`` event.
+    """Typed result of the feedback step, yielded as the ``done`` event payload.
 
-    ``values`` is the ``give_feedback`` arguments, keyed by feedback-fragment id
-    (empty/None entries dropped, mirroring the director's ``extra_fields``).
-    ``agent_raw`` is the raw model response, kept for logging only.
+    ``values`` holds the ``give_feedback`` arguments keyed by fragment id; empty
+    or None entries are dropped (mirroring the director's ``extra_fields``).
+    ``agent_raw`` is the raw model response, kept for logging.
     """
 
     values: dict = field(default_factory=dict)
@@ -57,14 +51,12 @@ class FeedbackResult:
 
 
 def extract_feedback_values(tool_calls: list[dict]) -> dict:
-    """Pull the ``give_feedback`` arguments out of parsed tool calls.
+    """Pull the ``give_feedback`` arguments from parsed tool calls.
 
-    Empty/None entries are dropped (mirroring the director's ``extra_fields``), so
-    a model that omits or blanks a field contributes nothing. A later call wins on
-    key collisions, matching ``apply_tool_calls``' update semantics. Each value is
-    normally a string (``build_feedback_tool`` declares string params); the empty
-    ``[]`` guard is defensive against a model that returns a list anyway, matching
-    the frontend's array handling in ``chat_inspector.feedbackRows``.
+    Empty or None entries are dropped. A later call wins on key collisions,
+    matching ``apply_tool_calls`` semantics. Each value is normally a string;
+    the empty ``[]`` guard is defensive against a model that returns a list,
+    matching the frontend's array handling in ``chat_inspector.feedbackRows``.
     """
     values: dict = {}
     for tc in tool_calls:
@@ -85,25 +77,20 @@ async def feedback_step(
     kv_tracker=None,
     reasoning_on: bool = False,
 ) -> AsyncIterator[dict]:
-    """Yields reasoning dicts during the call, then a single done dict.
+    """Yield reasoning chunks during the call, then a single done dict.
 
     Yields:
-        {"type": "reasoning", "delta": str}          — zero or more reasoning chunks
-        {"type": "done", "result": FeedbackResult}   — terminal step result
+        ``{"type": "reasoning", "delta": str}``
+        ``{"type": "done", "result": FeedbackResult}``
 
-    *base* is the editor lane's cached base, which already carries give_feedback
-    in its tools blob (the orchestrator registered the schema and threaded it via
-    schema_overrides). We reuse it untouched and only force
-    tool_choice=give_feedback, so this call hits the shared prefix+tools cache.
+    *base* already carries ``give_feedback`` in its tool blob; we reuse it
+    unchanged and only force ``tool_choice=give_feedback``.
 
-    The trailing replays the writer's exact user message and the reply as a real
-    ``assistant`` turn — mirroring the editor's stack (passes/editor.py) — so this
-    call *extends* the writer/editor KV-cached prefix instead of forking off the
-    bare base.prefix with a fresh single message. Forking would collapse the hit
-    to just the system+tools block (the post-fix feedback cache bust); extending
-    reuses ``prefix + writer_user_msg + reply`` and leaves only the short feedback
-    request as new bytes. *writer_user_msg* must be the same value threaded to the
-    editor's ``writer_user_msg`` so both share the writer's cached prefix.
+    The trailing replays ``writer_user_msg + reply`` (as the editor does) so the
+    call extends the warm writer/editor prefix rather than forking off the bare
+    ``base.prefix`` — which would collapse the cache hit to just the system+tools
+    block. *writer_user_msg* must be the same value passed to the editor so both
+    share the same cached prefix.
     """
     if not feedback_fragments:
         yield {"type": "done", "result": FeedbackResult()}

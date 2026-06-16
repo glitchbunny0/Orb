@@ -1,17 +1,15 @@
 """
-workflow_bridge.py — The pipeline's adapter onto the secondary-workflow framework.
+workflow_bridge.py — The single point where the pipeline talks to workflows.
 
-The single place the turn engine talks to ``workflows/``: it iterates the
-PRE_PIPELINE and POST_PIPELINE hook subscriptions, validates every event a hook
-yields (tool enables, system-prompt blocks, draft replacements, attachment
-artifacts, per-message state), and rejects malformed or reserved (underscore)
-events so one bad hook can neither crash a turn nor impersonate an internal
-event. ``_stage_workflow_attachment`` normalises a hook's ``attach_artifact``
-payload into the bytes-only dict ``add_message`` persists.
+Iterates PRE_PIPELINE and POST_PIPELINE hook subscriptions, validates every
+event a hook yields (tool enables, system-prompt blocks, draft replacements,
+attachment artifacts, per-message state), and rejects malformed or
+underscore-prefixed events so one bad hook can neither crash a turn nor
+impersonate an internal event.
 
 Depends only downward (``workflows``, ``inference``, ``core``); imports no
-pipeline sibling, so it is a leaf the setup (pre) and orchestrator (post) paths
-both point into.
+pipeline sibling, so both the pre-pipeline setup path and the post-pipeline
+orchestrator path can safely import it.
 """
 
 from __future__ import annotations
@@ -36,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _PostPipelineResult:
-    """Terminal value of :func:`_run_post_pipeline`: the (possibly hook-rewritten)
-    draft and the attachments / per-message state staged for persistence."""
+    """Final value of :func:`_run_post_pipeline`: the (possibly rewritten) draft
+    plus any attachments and per-message state staged for persistence."""
 
     draft: str
     staged_attachments: list[dict]
@@ -63,12 +61,10 @@ async def _run_post_pipeline(
 ) -> AsyncIterator[dict | _PostPipelineResult]:
     """Run every POST_PIPELINE workflow hook over the finished draft.
 
-    Streams pass-through SSE events from each hook and yields one terminal
-    :class:`_PostPipelineResult` when all hooks have run. Each hook may
-    replace the draft once, attach artifacts, or set per-message state.
-    Hook failures are logged and skipped so one bad hook cannot crash a turn.
-
-    Called by ``orchestrator._run_pipeline`` after the editor pass.
+    Streams pass-through SSE events and yields one final
+    :class:`_PostPipelineResult` when all hooks have run. Each hook may replace
+    the draft once, attach artifacts, or set per-message state. Hook failures
+    are logged and skipped so one bad hook cannot crash the turn.
     """
     staged_attachments: list[dict] = []
     staged_message_state: dict[str, dict] = {}
@@ -177,10 +173,8 @@ def _stage_workflow_attachment(att: object, workflow_id: str) -> dict | None:
     """Validate and normalize a workflow ``attach_artifact`` entry.
 
     Returns a bytes-only dict ready for ``add_message``, or ``None`` if
-    validation fails (with a logged warning). Never raises — bad workflow
-    output must not crash a turn.
-
-    Called by :func:`_run_post_pipeline` for each ``attach_artifact`` yield.
+    validation fails (logged as a warning). Never raises — bad workflow output
+    must not crash the turn.
     """
     if not isinstance(att, dict):
         logger.warning(
@@ -276,7 +270,7 @@ async def _iterate_pre_pipeline_hooks(
     schema_overrides: Mapping[str, dict],
     accumulators: dict,
 ) -> AsyncIterator[dict]:
-    """Run every PRE_PIPELINE workflow hook before the main pipeline starts.
+    """Run every PRE_PIPELINE workflow hook before the pipeline starts.
 
     Yields pass-through SSE events and mutates *accumulators* in place:
     ``enable_tools`` yields fold extra tools into the merged map;
@@ -285,8 +279,6 @@ async def _iterate_pre_pipeline_hooks(
 
     *accumulators* must be pre-populated with
     ``{"merged_enabled_tools": <dict>, "extras": []}``.
-
-    Called by ``context._prepare_turn``.
     """
     for sub in iter_subscriptions(HookType.PRE_PIPELINE):
         # Lock held for the hook's full lifetime to keep workflow_state RMW atomic.
